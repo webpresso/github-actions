@@ -182,6 +182,16 @@ jobs:
           console.log(`project_id=${projectId}`);
           NODE
 
+      - name: Export generic secret-manager bootstrap token
+        if: ${{ steps.secret_gate.outputs.ready == 'true' }}
+        shell: bash
+        run: |
+          {
+            echo "SECRET_MANAGER_TOKEN<<__SECRET_MANAGER_TOKEN__"
+            echo "${{ secrets.ci_secret_provider_token }}"
+            echo "__SECRET_MANAGER_TOKEN__"
+          } >> "$GITHUB_ENV"
+
       - name: Fail when CI bootstrap secret is required but missing
         if: ${{ steps.secret_gate.outputs.should_fail == 'true' }}
         shell: bash
@@ -194,6 +204,8 @@ jobs:
         if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INSTALL_COMMAND: ${{ inputs.install_command }}
         run: |
           set -euo pipefail

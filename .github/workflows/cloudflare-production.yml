@@ -116,6 +116,15 @@ jobs:
           console.log(`project_id=${projectId}`);
           NODE
 
+      - name: Export generic secret-manager bootstrap token
+        shell: bash
+        run: |
+          {
+            echo "SECRET_MANAGER_TOKEN<<__SECRET_MANAGER_TOKEN__"
+            echo "${{ secrets.ci_secret_provider_token }}"
+            echo "__SECRET_MANAGER_TOKEN__"
+          } >> "$GITHUB_ENV"
+
       - name: Require explicit CI bootstrap secret
         shell: bash
         env:
@@ -130,6 +139,8 @@ jobs:
       - name: Install caller dependencies
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INSTALL_COMMAND: ${{ inputs.install_command }}
         run: |
           set -euo pipefail
