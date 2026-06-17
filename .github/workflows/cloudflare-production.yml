@@ -125,6 +125,10 @@ jobs:
             echo "__SECRET_MANAGER_TOKEN__"
           } >> "$GITHUB_ENV"
 
+      - name: Install Doppler CLI bridge
+        if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
+        uses: dopplerhq/cli-action@v3
+
       - name: Require explicit CI bootstrap secret
         shell: bash
         env:
