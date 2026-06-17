@@ -130,6 +130,8 @@ jobs:
       - name: Install caller dependencies
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INSTALL_COMMAND: ${{ inputs.install_command }}
         run: |
           set -euo pipefail
