@@ -222,35 +222,6 @@ jobs:
           }
           NODE
 
-      - name: Export optional direct runtime secrets
-        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
-        shell: bash
-        env:
-        run: |
-          set -euo pipefail
-          write_secret_env() {
-            local name="$1"
-            local value="$2"
-            if [[ -z "$value" ]]; then
-              return
-            fi
-            {
-              echo "${name}<<__DIRECT_SECRET__"
-              echo "${value}"
-              echo "__DIRECT_SECRET__"
-            } >> "$GITHUB_ENV"
-          }
-          write_secret_env "CLOUDFLARE_ACCOUNT_ID" "${CLOUDFLARE_ACCOUNT_ID_VALUE}"
-          write_secret_env "CLOUDFLARE_API_TOKEN" "${CLOUDFLARE_API_TOKEN_VALUE}"
-          write_secret_env "CLOUDFLARE_ZONE_ID" "${CLOUDFLARE_ZONE_ID_VALUE}"
-          write_secret_env "NEON_API_KEY" "${NEON_API_KEY_VALUE}"
-          write_secret_env "NEON_PROJECT_ID" "${NEON_PROJECT_ID_VALUE}"
-          write_secret_env "NEON_PARENT_BRANCH_ID" "${NEON_PARENT_BRANCH_ID_VALUE}"
-          write_secret_env "PULUMI_ACCESS_TOKEN" "${PULUMI_ACCESS_TOKEN_VALUE}"
-          write_secret_env "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET_VALUE}"
-          write_secret_env "JWT_SECRET" "${JWT_SECRET_VALUE}"
-          write_secret_env "LANGFUSE_PUBLIC_KEY" "${LANGFUSE_PUBLIC_KEY_VALUE}"
-          write_secret_env "LANGFUSE_SECRET_KEY" "${LANGFUSE_SECRET_KEY_VALUE}"
 
       - name: Run caller cleanup command
         if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
