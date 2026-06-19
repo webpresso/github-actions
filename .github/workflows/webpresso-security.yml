@@ -1,0 +1,65 @@
+name: Reusable Webpresso security
+
+on:
+  workflow_call:
+    inputs:
+      install_command:
+        description: "Caller-owned install/bootstrap command block"
+        required: true
+        type: string
+      security_command:
+        description: "Caller-owned security command block"
+        required: true
+        type: string
+      runner:
+        description: "Runner label"
+        required: false
+        default: ubuntu-latest
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  security:
+    name: security
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: OSV Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --recursive
+            ./
+
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+
+      - name: Install caller dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$INSTALL_COMMAND"
+
+      - name: Run caller security block
+        shell: bash
+        env:
+          SECURITY_COMMAND: ${{ inputs.security_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$SECURITY_COMMAND"

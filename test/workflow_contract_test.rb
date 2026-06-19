@@ -6,6 +6,8 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_PREVIEW = File.join(REPO_ROOT, ".github", "workflows", "cloudflare-preview.yml")
   WORKFLOW_PRODUCTION = File.join(REPO_ROOT, ".github", "workflows", "cloudflare-production.yml")
   WORKFLOW_RELEASE = File.join(REPO_ROOT, ".github", "workflows", "changesets-release.yml")
+  WORKFLOW_CI = File.join(REPO_ROOT, ".github", "workflows", "webpresso-ci.yml")
+  WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
 
   def test_preview_workflow_bootstrap_contract_and_pins
@@ -63,6 +65,29 @@ class WorkflowContractTest < Minitest::Test
     assert_includes readme, "repo-owned secret profiles"
     assert_includes readme, "ci_secret_provider_token"
     assert_includes readme, "full commit SHA"
+  end
+
+  def test_shared_ci_workflow_uses_shared_toolchain_and_aggregate_gate
+    workflow = load_yaml(WORKFLOW_CI)
+    inputs = workflow_call_inputs(workflow)
+    assert_equal "string", inputs.dig("install_command", "type")
+    assert_equal "string", inputs.dig("quality_command", "type")
+    assert_equal "", inputs.dig("e2e_command", "default")
+    assert_equal "", inputs.dig("architecture_command", "default")
+    assert_equal "", inputs.dig("deploy_verify_command", "default")
+    assert_step_uses(WORKFLOW_CI, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
+    assert_equal ["quality", "e2e", "architecture", "deploy-verify"], workflow.dig("jobs", "ci", "needs")
+    assert_equal "ci", workflow.dig("jobs", "ci", "name")
+  end
+
+  def test_shared_security_workflow_uses_pinned_scanners_and_shared_toolchain
+    workflow = load_yaml(WORKFLOW_SECURITY)
+    inputs = workflow_call_inputs(workflow)
+    assert_equal "string", inputs.dig("install_command", "type")
+    assert_equal "string", inputs.dig("security_command", "type")
+    assert_step_uses(WORKFLOW_SECURITY, "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7")
+    assert_step_uses(WORKFLOW_SECURITY, "google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2")
+    assert_step_uses(WORKFLOW_SECURITY, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
   end
 
   private

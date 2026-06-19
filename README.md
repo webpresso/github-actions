@@ -3,6 +3,8 @@
 Public reusable GitHub Actions workflows for Webpresso consumer repositories.
 
 Current workflows:
+- `.github/workflows/webpresso-ci.yml`
+- `.github/workflows/webpresso-security.yml`
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
 - `.github/actions/setup-webpresso-toolchain/action.yml`

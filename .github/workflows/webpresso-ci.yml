@@ -1,0 +1,179 @@
+name: Reusable Webpresso CI
+
+on:
+  workflow_call:
+    inputs:
+      install_command:
+        description: "Caller-owned install/bootstrap command block"
+        required: true
+        type: string
+      quality_command:
+        description: "Caller-owned quality command block"
+        required: true
+        type: string
+      e2e_command:
+        description: "Caller-owned e2e command block"
+        required: false
+        default: ""
+        type: string
+      architecture_command:
+        description: "Caller-owned architecture validation command block"
+        required: false
+        default: ""
+        type: string
+      deploy_verify_command:
+        description: "Caller-owned deploy verification command block"
+        required: false
+        default: ""
+        type: string
+      runner:
+        description: "Runner label"
+        required: false
+        default: ubuntu-latest
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+
+      - name: Install caller dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$INSTALL_COMMAND"
+
+      - name: Run caller quality block
+        shell: bash
+        env:
+          QUALITY_COMMAND: ${{ inputs.quality_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$QUALITY_COMMAND"
+
+  e2e:
+    name: e2e
+    if: ${{ inputs.e2e_command != '' }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - name: Install caller dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$INSTALL_COMMAND"
+      - name: Run caller e2e block
+        shell: bash
+        env:
+          E2E_COMMAND: ${{ inputs.e2e_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$E2E_COMMAND"
+
+  architecture:
+    name: architecture
+    if: ${{ inputs.architecture_command != '' }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - name: Install caller dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$INSTALL_COMMAND"
+      - name: Run caller architecture block
+        shell: bash
+        env:
+          ARCHITECTURE_COMMAND: ${{ inputs.architecture_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$ARCHITECTURE_COMMAND"
+
+  deploy-verify:
+    name: deploy
+    if: ${{ inputs.deploy_verify_command != '' }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - name: Install caller dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$INSTALL_COMMAND"
+      - name: Run caller deploy verification block
+        shell: bash
+        env:
+          DEPLOY_VERIFY_COMMAND: ${{ inputs.deploy_verify_command }}
+        run: |
+          set -euo pipefail
+          bash -leo pipefail -c "$DEPLOY_VERIFY_COMMAND"
+
+  ci:
+    name: ci
+    if: ${{ always() }}
+    needs:
+      - quality
+      - e2e
+      - architecture
+      - deploy-verify
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Enforce aggregate CI gate
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          DEPLOY_VERIFY_RESULT: ${{ needs.deploy-verify.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for result in \
+            "$QUALITY_RESULT" \
+            "$E2E_RESULT" \
+            "$ARCHITECTURE_RESULT" \
+            "$DEPLOY_VERIFY_RESULT"; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::A required CI job finished with result: $result"
+              exit 1
+            fi
+          done
