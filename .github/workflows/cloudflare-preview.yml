@@ -34,18 +34,8 @@ on:
         required: false
         default: ""
         type: string
-      secret_profile:
-        description: "Repo-owned secret profile name from .webpresso/secrets.config.json"
-        required: false
-        default: ""
-        type: string
-      doppler_identity_id:
-        description: "Doppler OIDC service account identity ID (safe to commit)"
-        required: false
-        default: ""
-        type: string
-      infisical_identity_id:
-        description: "Infisical OIDC machine identity ID (safe to commit)"
+      secret_env_profile:
+        description: "Repo-owned secret-manager environment/profile slug"
         required: false
         default: ""
         type: string
@@ -54,6 +44,11 @@ on:
         required: false
         default: ubuntu-latest
         type: string
+      skip_when_ci_secret_missing:
+        description: "Skip deploy/destroy when the explicit provider bootstrap secret is absent"
+        required: false
+        default: false
+        type: boolean
     secrets:
       ci_secret_provider_token:
         required: false
@@ -94,7 +89,7 @@ jobs:
       DEPLOY_LANE: ${{ inputs.lane }}
       DEPLOY_MODE: ${{ inputs.mode }}
       RELEASE_VERSION: ""
-      SECRET_PROFILE: ${{ inputs.secret_profile }}
+      SECRET_ENV_PROFILE: ${{ inputs.secret_env_profile }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -113,115 +108,137 @@ jobs:
           }
           NODE
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - name: Evaluate CI bootstrap secret availability
+        id: secret_gate
+        shell: bash
+        env:
+          TOKEN_PRESENT: ${{ secrets.ci_secret_provider_token != '' && 'true' || 'false' }}
+          SKIP_ALLOWED: ${{ inputs.skip_when_ci_secret_missing && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "${TOKEN_PRESENT}" == "true" ]]; then
+            {
+              echo "ready=true"
+              echo "should_fail=false"
+              echo "skipped=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${SKIP_ALLOWED}" == "true" ]]; then
+            {
+              echo "ready=false"
+              echo "should_fail=false"
+              echo "skipped=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "ready=false"
+            echo "should_fail=true"
+            echo "skipped=false"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve caller pnpm version
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        id: pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const packageManager = typeof manifest.packageManager === "string" ? manifest.packageManager : "";
+          const match = /^pnpm@(.+)$/u.exec(packageManager);
+          if (!match) {
+            throw new Error('package.json must declare packageManager like "pnpm@<version>" for the shared deploy harness.');
+          }
+          console.log(`version=${match[1]}`);
+          NODE
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        with:
+          version: ${{ steps.pnpm.outputs.version }}
+          run_install: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        with:
+          node-version: "24.16.0"
+          cache: pnpm
+
+      - name: Enable Corepack + caller pnpm
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare "pnpm@${{ steps.pnpm.outputs.version }}" --activate
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        with:
+          bun-version: latest
 
       - name: Read committed secret-manager metadata
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         id: secret_config
         shell: bash
         run: |
           set -euo pipefail
-          SECRET_PROFILE="${SECRET_PROFILE}" node <<'NODE' >> "$GITHUB_OUTPUT"
+          node <<'NODE' >> "$GITHUB_OUTPUT"
           const fs = require("node:fs");
           const path = ".webpresso/secrets.config.json";
           if (!fs.existsSync(path)) {
             throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
-          const manager = payload?.manager;
-          const projectId = payload?.projectId;
-          const secretProfile = process.env.SECRET_PROFILE ?? "";
-          const profile = payload?.profiles?.[secretProfile];
-          const environment = profile?.environment;
+          let manager = payload?.manager;
+          let projectId = payload?.projectId;
+          let environment = process.env.SECRET_ENV_PROFILE || "";
+          if (payload?.schemaVersion === 1) {
+            const profileName = environment || (String(process.env.DEPLOY_LANE || "").startsWith("preview_") ? "preview" : "production");
+            const profile = payload?.profiles?.[profileName];
+            const provider = profile ? payload?.providers?.[profile.provider] : payload?.providers?.default;
+            manager = provider?.type;
+            projectId = provider?.project;
+            environment = profile?.environment || environment;
+          }
           if (manager !== "doppler" && manager !== "infisical") {
             throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
           }
           if (typeof projectId !== "string" || projectId.length === 0) {
             throw new Error(`Invalid projectId in ${path}.`);
           }
-          if (typeof secretProfile !== "string" || secretProfile.length === 0) {
-            throw new Error(`Missing workflow_call input secret_profile.`);
-          }
-          if (typeof environment !== "string" || environment.length === 0) {
-            throw new Error(`Unknown secret profile "${secretProfile}" in ${path}.`);
-          }
           console.log(`manager=${manager}`);
           console.log(`project_id=${projectId}`);
-          console.log(`secret_environment=${environment}`);
+          if (environment) console.log(`environment=${environment}`);
           NODE
 
-      - name: Detect optional Doppler bootstrap token
-        id: doppler_token
+      - name: Export generic secret-manager bootstrap token
+        if: ${{ steps.secret_gate.outputs.ready == 'true' }}
         shell: bash
-        env:
-          CI_SECRET_PROVIDER_TOKEN: ${{ secrets.ci_secret_provider_token }}
         run: |
-          set -euo pipefail
-          if [[ -n "${CI_SECRET_PROVIDER_TOKEN}" ]]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "SECRET_MANAGER_TOKEN<<__SECRET_MANAGER_TOKEN__"
+            echo "${{ secrets.ci_secret_provider_token }}"
+            echo "__SECRET_MANAGER_TOKEN__"
+          } >> "$GITHUB_ENV"
 
-      - name: Validate secret-manager bootstrap inputs
+      - name: Install Doppler CLI bridge
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
+        uses: dopplerhq/cli-action@v3
+
+      - name: Fail when CI bootstrap secret is required but missing
+        if: ${{ steps.secret_gate.outputs.should_fail == 'true' }}
         shell: bash
-        env:
-          SECRET_MANAGER: ${{ steps.secret_config.outputs.manager }}
-          TOKEN_PRESENT: ${{ steps.doppler_token.outputs.present }}
-          DOPPLER_IDENTITY_ID: ${{ inputs.doppler_identity_id }}
-          INFISICAL_IDENTITY_ID: ${{ inputs.infisical_identity_id }}
-          SECRET_PROFILE: ${{ inputs.secret_profile }}
         run: |
-          set -euo pipefail
-          case "${SECRET_MANAGER}" in
-            doppler)
-              if [[ "${TOKEN_PRESENT}" != "true" && -z "${DOPPLER_IDENTITY_ID}" ]]; then
-                echo "Doppler bootstrap requires either workflow_call secret ci_secret_provider_token or input doppler_identity_id." >&2
-                exit 1
-              fi
-              if [[ -z "${SECRET_PROFILE}" ]]; then
-                echo "Doppler bootstrap requires workflow_call input secret_profile." >&2
-                exit 1
-              fi
-              ;;
-            infisical)
-              if [[ -z "${INFISICAL_IDENTITY_ID}" ]]; then
-                echo "Missing required workflow_call input: infisical_identity_id" >&2
-                exit 1
-              fi
-              if [[ -z "${SECRET_PROFILE}" ]]; then
-                echo "Infisical OIDC bootstrap requires workflow_call input secret_profile." >&2
-                exit 1
-              fi
-              ;;
-          esac
-
-      - name: Fetch Doppler-managed runtime secrets via token
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'true' }}
-        uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
-        with:
-          doppler-token: ${{ secrets.ci_secret_provider_token }}
-          inject-env-vars: true
-
-      - name: Fetch Doppler-managed runtime secrets via OIDC
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'false' }}
-        uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
-        with:
-          auth-method: oidc
-          doppler-identity-id: ${{ inputs.doppler_identity_id }}
-          doppler-project: ${{ steps.secret_config.outputs.project_id }}
-          doppler-config: ${{ steps.secret_config.outputs.secret_environment }}
-          inject-env-vars: true
-
-      - name: Fetch Infisical-managed runtime secrets via OIDC
-        if: ${{ steps.secret_config.outputs.manager == 'infisical' }}
-        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
-        with:
-          method: "oidc"
-          identity-id: ${{ inputs.infisical_identity_id }}
-          project-slug: ${{ steps.secret_config.outputs.project_id }}
-          env-slug: ${{ steps.secret_config.outputs.secret_environment }}
+          echo "Missing required reusable-workflow secret: ci_secret_provider_token" >&2
+          echo "Configure a provider bootstrap secret in the caller repo, then pass it explicitly via workflow-call secrets." >&2
+          exit 1
 
       - name: Install caller dependencies
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -231,7 +248,85 @@ jobs:
           set -euo pipefail
           bash -leo pipefail -c "$INSTALL_COMMAND"
 
+      - name: Inject Doppler-managed runtime secrets
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
+        with:
+          doppler-token: ${{ secrets.ci_secret_provider_token }}
+          inject-env-vars: true
+
+      - name: Inject Infisical-managed runtime secrets
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'infisical' }}
+        shell: bash
+        env:
+          INFISICAL_DISABLE_UPDATE_CHECK: "true"
+          INFISICAL_TOKEN: ${{ secrets.ci_secret_provider_token }}
+          INFISICAL_ENV_SLUG: ${{ steps.secret_config.outputs.environment || inputs.secret_env_profile }}
+          INFISICAL_PROJECT_ID: ${{ steps.secret_config.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INFISICAL_ENV_SLUG}" ]]; then
+            echo "Infisical bootstrap requires workflow_call input secret_env_profile." >&2
+            exit 1
+          fi
+          npm install --global @infisical/cli@0.43.91
+          tmp_json="$(mktemp)"
+          infisical export --projectId="${INFISICAL_PROJECT_ID}" --env="${INFISICAL_ENV_SLUG}" --format=json > "${tmp_json}"
+          node - "${tmp_json}" <<'NODE' >> "$GITHUB_ENV"
+          const fs = require("node:fs");
+          const payloadPath = process.argv[2];
+          const secrets = JSON.parse(fs.readFileSync(payloadPath, "utf8"));
+          for (const [key, value] of Object.entries(secrets)) {
+            const rendered = String(value ?? "");
+            console.log(`${key}<<__INFISICAL_EOF__`);
+            console.log(rendered);
+            console.log("__INFISICAL_EOF__");
+          }
+          NODE
+
+      - name: Export optional direct runtime secrets
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID_VALUE: ${{ secrets.cloudflare_account_id }}
+          CLOUDFLARE_API_TOKEN_VALUE: ${{ secrets.cloudflare_api_token }}
+          CLOUDFLARE_ZONE_ID_VALUE: ${{ secrets.cloudflare_zone_id }}
+          NEON_API_KEY_VALUE: ${{ secrets.neon_api_key }}
+          NEON_PROJECT_ID_VALUE: ${{ secrets.neon_project_id }}
+          NEON_PARENT_BRANCH_ID_VALUE: ${{ secrets.neon_parent_branch_id }}
+          PULUMI_ACCESS_TOKEN_VALUE: ${{ secrets.pulumi_access_token }}
+          BETTER_AUTH_SECRET_VALUE: ${{ secrets.better_auth_secret }}
+          JWT_SECRET_VALUE: ${{ secrets.jwt_secret }}
+          LANGFUSE_PUBLIC_KEY_VALUE: ${{ secrets.langfuse_public_key }}
+          LANGFUSE_SECRET_KEY_VALUE: ${{ secrets.langfuse_secret_key }}
+        run: |
+          set -euo pipefail
+          write_secret_env() {
+            local name="$1"
+            local value="$2"
+            if [[ -z "$value" ]]; then
+              return
+            fi
+            {
+              echo "${name}<<__DIRECT_SECRET__"
+              echo "${value}"
+              echo "__DIRECT_SECRET__"
+            } >> "$GITHUB_ENV"
+          }
+          write_secret_env "CLOUDFLARE_ACCOUNT_ID" "${CLOUDFLARE_ACCOUNT_ID_VALUE}"
+          write_secret_env "CLOUDFLARE_API_TOKEN" "${CLOUDFLARE_API_TOKEN_VALUE}"
+          write_secret_env "CLOUDFLARE_ZONE_ID" "${CLOUDFLARE_ZONE_ID_VALUE}"
+          write_secret_env "NEON_API_KEY" "${NEON_API_KEY_VALUE}"
+          write_secret_env "NEON_PROJECT_ID" "${NEON_PROJECT_ID_VALUE}"
+          write_secret_env "NEON_PARENT_BRANCH_ID" "${NEON_PARENT_BRANCH_ID_VALUE}"
+          write_secret_env "PULUMI_ACCESS_TOKEN" "${PULUMI_ACCESS_TOKEN_VALUE}"
+          write_secret_env "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET_VALUE}"
+          write_secret_env "JWT_SECRET" "${JWT_SECRET_VALUE}"
+          write_secret_env "LANGFUSE_PUBLIC_KEY" "${LANGFUSE_PUBLIC_KEY_VALUE}"
+          write_secret_env "LANGFUSE_SECRET_KEY" "${LANGFUSE_SECRET_KEY_VALUE}"
+
       - name: Run caller verify block
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         env:
           VERIFY_COMMAND: ${{ inputs.verify_command }}
@@ -239,8 +334,14 @@ jobs:
           set -euo pipefail
           bash -leo pipefail -c "$VERIFY_COMMAND"
 
+      - name: Skip preview execution when bootstrap secret is unavailable
+        if: ${{ steps.secret_gate.outputs.skipped == 'true' }}
+        shell: bash
+        run: |
+          echo "Skipping preview ${DEPLOY_MODE} for ${DEPLOY_LANE}: ci_secret_provider_token is not configured in the caller repo."
+
       - name: Run caller deploy block
-        if: ${{ inputs.mode == 'deploy' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && inputs.mode == 'deploy' }}
         shell: bash
         env:
           DEPLOY_COMMAND: ${{ inputs.deploy_command }}
@@ -249,14 +350,14 @@ jobs:
           bash -leo pipefail -c "$DEPLOY_COMMAND"
 
       - name: Require preview destroy command when mode=destroy
-        if: ${{ inputs.mode == 'destroy' && inputs.destroy_command == '' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && inputs.mode == 'destroy' && inputs.destroy_command == '' }}
         shell: bash
         run: |
           echo "mode=destroy requires workflow_call input destroy_command." >&2
           exit 1
 
       - name: Run caller destroy block
-        if: ${{ inputs.mode == 'destroy' && inputs.destroy_command != '' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && inputs.mode == 'destroy' && inputs.destroy_command != '' }}
         shell: bash
         env:
           DESTROY_COMMAND: ${{ inputs.destroy_command }}
@@ -265,7 +366,7 @@ jobs:
           bash -leo pipefail -c "$DESTROY_COMMAND"
 
       - name: Run caller smoke block
-        if: ${{ inputs.mode == 'deploy' && inputs.smoke_command != '' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && inputs.mode == 'deploy' && inputs.smoke_command != '' }}
         shell: bash
         env:
           SMOKE_COMMAND: ${{ inputs.smoke_command }}
