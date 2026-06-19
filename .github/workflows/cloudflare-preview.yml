@@ -83,6 +83,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
+      id-token: write
       packages: read
     env:
       DEPLOY_LANE: ${{ inputs.lane }}
@@ -216,7 +217,7 @@ jobs:
 
       - name: Install Doppler CLI bridge
         if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
-        uses: dopplerhq/cli-action@v3
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
       - name: Fail when CI bootstrap secret is required but missing
         if: ${{ steps.secret_gate.outputs.should_fail == 'true' }}

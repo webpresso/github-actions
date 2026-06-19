@@ -1,4 +1,4 @@
-name: Reusable Cloudflare production deploy
+name: Reusable wp e2e
 
 on:
   workflow_call:
@@ -11,22 +11,12 @@ on:
         description: "Caller-owned verify/build command block"
         required: true
         type: string
-      deploy_command:
-        description: "Caller-owned production deploy command block"
+      e2e_command:
+        description: "Caller-owned e2e command block"
         required: true
-        type: string
-      smoke_command:
-        description: "Caller-owned post-deploy smoke command block"
-        required: false
-        default: ""
         type: string
       secret_env_profile:
         description: "Repo-owned secret-manager environment/profile slug"
-        required: false
-        default: ""
-        type: string
-      release_version:
-        description: "Optional caller-owned release gate version exported as RELEASE_VERSION"
         required: false
         default: ""
         type: string
@@ -50,31 +40,17 @@ on:
         required: false
       neon_parent_branch_id:
         required: false
-      pulumi_access_token:
-        required: false
-      better_auth_secret:
-        required: false
-      jwt_secret:
-        required: false
-      langfuse_public_key:
-        required: false
-      langfuse_secret_key:
-        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  production:
+  e2e:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       id-token: write
       packages: read
-    env:
-      DEPLOY_LANE: prd
-      RELEASE_VERSION: ${{ inputs.release_version }}
-      SECRET_ENV_PROFILE: ${{ inputs.secret_env_profile }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -89,7 +65,7 @@ jobs:
           const packageManager = typeof manifest.packageManager === "string" ? manifest.packageManager : "";
           const match = /^pnpm@(.+)$/u.exec(packageManager);
           if (!match) {
-            throw new Error('package.json must declare packageManager like "pnpm@<version>" for the shared deploy harness.');
+            throw new Error('package.json must declare packageManager like "pnpm@<version>" for the shared e2e harness.');
           }
           console.log(`version=${match[1]}`);
           NODE
@@ -124,7 +100,7 @@ jobs:
           const fs = require("node:fs");
           const path = ".webpresso/secrets.config.json";
           if (!fs.existsSync(path)) {
-            throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
+            throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared e2e harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
           const manager = payload?.manager;
@@ -139,43 +115,6 @@ jobs:
           console.log(`project_id=${projectId}`);
           NODE
 
-      - name: Export generic secret-manager bootstrap token
-        shell: bash
-        run: |
-          {
-            echo "SECRET_MANAGER_TOKEN<<__SECRET_MANAGER_TOKEN__"
-            echo "${{ secrets.ci_secret_provider_token }}"
-            echo "__SECRET_MANAGER_TOKEN__"
-          } >> "$GITHUB_ENV"
-
-      - name: Export provider-specific secret-manager bootstrap token
-        shell: bash
-        env:
-          SECRET_MANAGER: ${{ steps.secret_config.outputs.manager }}
-          CI_SECRET_PROVIDER_TOKEN: ${{ secrets.ci_secret_provider_token }}
-        run: |
-          set -euo pipefail
-          case "${SECRET_MANAGER}" in
-            doppler)
-              {
-                echo "DOPPLER_TOKEN<<__DOPPLER_TOKEN__"
-                echo "${CI_SECRET_PROVIDER_TOKEN}"
-                echo "__DOPPLER_TOKEN__"
-              } >> "$GITHUB_ENV"
-              ;;
-            infisical)
-              {
-                echo "INFISICAL_TOKEN<<__INFISICAL_TOKEN__"
-                echo "${CI_SECRET_PROVIDER_TOKEN}"
-                echo "__INFISICAL_TOKEN__"
-              } >> "$GITHUB_ENV"
-              ;;
-          esac
-
-      - name: Install Doppler CLI bridge
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
-        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
-
       - name: Require explicit CI bootstrap secret
         shell: bash
         env:
@@ -186,6 +125,10 @@ jobs:
             echo "Missing required reusable-workflow secret: ci_secret_provider_token" >&2
             exit 1
           fi
+
+      - name: Install Doppler CLI bridge
+        if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
       - name: Install caller dependencies
         shell: bash
@@ -232,48 +175,9 @@ jobs:
             console.log("__INFISICAL_EOF__");
           }
           NODE
+          rm -f "${tmp_json}"
 
-      - name: Export optional direct runtime secrets
-        shell: bash
-        env:
-          CLOUDFLARE_ACCOUNT_ID_VALUE: ${{ secrets.cloudflare_account_id }}
-          CLOUDFLARE_API_TOKEN_VALUE: ${{ secrets.cloudflare_api_token }}
-          CLOUDFLARE_ZONE_ID_VALUE: ${{ secrets.cloudflare_zone_id }}
-          NEON_API_KEY_VALUE: ${{ secrets.neon_api_key }}
-          NEON_PROJECT_ID_VALUE: ${{ secrets.neon_project_id }}
-          NEON_PARENT_BRANCH_ID_VALUE: ${{ secrets.neon_parent_branch_id }}
-          PULUMI_ACCESS_TOKEN_VALUE: ${{ secrets.pulumi_access_token }}
-          BETTER_AUTH_SECRET_VALUE: ${{ secrets.better_auth_secret }}
-          JWT_SECRET_VALUE: ${{ secrets.jwt_secret }}
-          LANGFUSE_PUBLIC_KEY_VALUE: ${{ secrets.langfuse_public_key }}
-          LANGFUSE_SECRET_KEY_VALUE: ${{ secrets.langfuse_secret_key }}
-        run: |
-          set -euo pipefail
-          write_secret_env() {
-            local name="$1"
-            local value="$2"
-            if [[ -z "$value" ]]; then
-              return
-            fi
-            {
-              echo "${name}<<__DIRECT_SECRET__"
-              echo "${value}"
-              echo "__DIRECT_SECRET__"
-            } >> "$GITHUB_ENV"
-          }
-          write_secret_env "CLOUDFLARE_ACCOUNT_ID" "${CLOUDFLARE_ACCOUNT_ID_VALUE}"
-          write_secret_env "CLOUDFLARE_API_TOKEN" "${CLOUDFLARE_API_TOKEN_VALUE}"
-          write_secret_env "CLOUDFLARE_ZONE_ID" "${CLOUDFLARE_ZONE_ID_VALUE}"
-          write_secret_env "NEON_API_KEY" "${NEON_API_KEY_VALUE}"
-          write_secret_env "NEON_PROJECT_ID" "${NEON_PROJECT_ID_VALUE}"
-          write_secret_env "NEON_PARENT_BRANCH_ID" "${NEON_PARENT_BRANCH_ID_VALUE}"
-          write_secret_env "PULUMI_ACCESS_TOKEN" "${PULUMI_ACCESS_TOKEN_VALUE}"
-          write_secret_env "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET_VALUE}"
-          write_secret_env "JWT_SECRET" "${JWT_SECRET_VALUE}"
-          write_secret_env "LANGFUSE_PUBLIC_KEY" "${LANGFUSE_PUBLIC_KEY_VALUE}"
-          write_secret_env "LANGFUSE_SECRET_KEY" "${LANGFUSE_SECRET_KEY_VALUE}"
-
-      - name: Run caller verify block
+      - name: Verify caller surface
         shell: bash
         env:
           VERIFY_COMMAND: ${{ inputs.verify_command }}
@@ -281,19 +185,10 @@ jobs:
           set -euo pipefail
           bash -leo pipefail -c "$VERIFY_COMMAND"
 
-      - name: Run caller deploy block
+      - name: Run caller e2e command
         shell: bash
         env:
-          DEPLOY_COMMAND: ${{ inputs.deploy_command }}
+          E2E_COMMAND: ${{ inputs.e2e_command }}
         run: |
           set -euo pipefail
-          bash -leo pipefail -c "$DEPLOY_COMMAND"
-
-      - name: Run caller smoke block
-        if: ${{ inputs.smoke_command != '' }}
-        shell: bash
-        env:
-          SMOKE_COMMAND: ${{ inputs.smoke_command }}
-        run: |
-          set -euo pipefail
-          bash -leo pipefail -c "$SMOKE_COMMAND"
+          bash -leo pipefail -c "$E2E_COMMAND"
