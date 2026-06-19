@@ -10,3 +10,8 @@ Current workflows:
 - `.github/workflows/wp-secret-orchestration-smoke.yml`
 
 Consumers should pin reusable workflow references by full commit SHA.
+
+Secret orchestration contract:
+- Consumers pass repo-owned secret profiles through `secret_profile`.
+- Consumers pass provider bootstrap through `ci_secret_provider_token`; reusable workflows fail closed when it is missing.
+- Consumers should pin reusable workflow references by full commit SHA.

@@ -14,12 +14,8 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_PREVIEW), "secret_env_profile"
     assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "preview", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
-    assert_step_uses(WORKFLOW_PREVIEW, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PREVIEW, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
+    assert_step_uses(WORKFLOW_PREVIEW, "dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     refute_includes File.read(WORKFLOW_PREVIEW), "__DIRECT_SECRET__"
   end
 
@@ -28,12 +24,8 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_PRODUCTION), "secret_env_profile"
     assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "production", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
-    assert_step_uses(WORKFLOW_PRODUCTION, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PRODUCTION, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
+    assert_step_uses(WORKFLOW_PRODUCTION, "dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"
   end
 
