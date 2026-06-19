@@ -1,0 +1,65 @@
+name: Reusable wp preview cleanup
+
+on:
+  workflow_call:
+    inputs:
+      lane:
+        description: "Canonical preview lane: preview_main or preview_pr_<n>"
+        required: true
+        type: string
+      install_command:
+        description: "Caller-owned install/bootstrap command block"
+        required: true
+        type: string
+      destroy_command:
+        description: "Caller-owned cleanup command block"
+        required: true
+        type: string
+      secret_env_profile:
+        description: "Repo-owned secret-manager environment/profile slug"
+        required: false
+        default: ""
+        type: string
+      runner:
+        description: "Runner label"
+        required: false
+        default: ubuntu-latest
+        type: string
+    secrets:
+      ci_secret_provider_token:
+        required: false
+      cloudflare_account_id:
+        required: false
+      cloudflare_api_token:
+        required: false
+      cloudflare_zone_id:
+        required: false
+      neon_api_key:
+        required: false
+      neon_project_id:
+        required: false
+      neon_parent_branch_id:
+        required: false
+
+jobs:
+  cleanup:
+    uses: ./.github/workflows/cloudflare-preview.yml
+    with:
+      lane: ${{ inputs.lane }}
+      mode: destroy
+      install_command: ${{ inputs.install_command }}
+      verify_command: 'echo "cleanup verification not required"'
+      deploy_command: 'echo "deploy path disabled for cleanup wrapper"'
+      destroy_command: ${{ inputs.destroy_command }}
+      smoke_command: ''
+      secret_env_profile: ${{ inputs.secret_env_profile }}
+      runner: ${{ inputs.runner }}
+      skip_when_ci_secret_missing: false
+    secrets:
+      ci_secret_provider_token: ${{ secrets.ci_secret_provider_token }}
+      cloudflare_account_id: ${{ secrets.cloudflare_account_id }}
+      cloudflare_api_token: ${{ secrets.cloudflare_api_token }}
+      cloudflare_zone_id: ${{ secrets.cloudflare_zone_id }}
+      neon_api_key: ${{ secrets.neon_api_key }}
+      neon_project_id: ${{ secrets.neon_project_id }}
+      neon_parent_branch_id: ${{ secrets.neon_parent_branch_id }}
