@@ -44,7 +44,26 @@ jobs:
             --recursive
             ./
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+
+      - name: Install caller CLI globals
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE' > /tmp/webpresso-cli-globals
+          const fs = require('node:fs')
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+          const dev = pkg.devDependencies ?? {}
+          const specs = []
+          const vp = dev['vite-plus']
+          const ak = dev['@webpresso/agent-kit']
+          if (typeof vp === 'string' && vp && vp !== 'catalog:' && !vp.startsWith('workspace:')) specs.push(`vite-plus@${vp}`)
+          if (typeof ak === 'string' && ak && ak !== 'catalog:' && !ak.startsWith('workspace:')) specs.push(`@webpresso/agent-kit@${ak}`)
+          process.stdout.write(specs.join(' '))
+          NODE
+          if [[ -s /tmp/webpresso-cli-globals ]]; then
+            npm install -g $(cat /tmp/webpresso-cli-globals)
+          fi
 
       - name: Install caller dependencies
         shell: bash
