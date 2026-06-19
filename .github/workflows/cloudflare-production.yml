@@ -38,28 +38,6 @@ on:
     secrets:
       ci_secret_provider_token:
         required: false
-      cloudflare_account_id:
-        required: false
-      cloudflare_api_token:
-        required: false
-      cloudflare_zone_id:
-        required: false
-      neon_api_key:
-        required: false
-      neon_project_id:
-        required: false
-      neon_parent_branch_id:
-        required: false
-      pulumi_access_token:
-        required: false
-      better_auth_secret:
-        required: false
-      jwt_secret:
-        required: false
-      langfuse_public_key:
-        required: false
-      langfuse_secret_key:
-        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -162,21 +140,18 @@ jobs:
         shell: bash
         env:
           SECRET_MANAGER: ${{ steps.secret_config.outputs.manager }}
-          CI_SECRET_PROVIDER_TOKEN: ${{ secrets.ci_secret_provider_token }}
         run: |
           set -euo pipefail
           case "${SECRET_MANAGER}" in
             doppler)
               {
                 echo "DOPPLER_TOKEN<<__DOPPLER_TOKEN__"
-                echo "${CI_SECRET_PROVIDER_TOKEN}"
                 echo "__DOPPLER_TOKEN__"
               } >> "$GITHUB_ENV"
               ;;
             infisical)
               {
                 echo "INFISICAL_TOKEN<<__INFISICAL_TOKEN__"
-                echo "${CI_SECRET_PROVIDER_TOKEN}"
                 echo "__INFISICAL_TOKEN__"
               } >> "$GITHUB_ENV"
               ;;
@@ -184,7 +159,7 @@ jobs:
 
       - name: Install Doppler CLI bridge
         if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
-        uses: dopplerhq/cli-action@v3
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
       - name: Require explicit CI bootstrap secret
         shell: bash
@@ -246,17 +221,6 @@ jobs:
       - name: Export optional direct runtime secrets
         shell: bash
         env:
-          CLOUDFLARE_ACCOUNT_ID_VALUE: ${{ secrets.cloudflare_account_id }}
-          CLOUDFLARE_API_TOKEN_VALUE: ${{ secrets.cloudflare_api_token }}
-          CLOUDFLARE_ZONE_ID_VALUE: ${{ secrets.cloudflare_zone_id }}
-          NEON_API_KEY_VALUE: ${{ secrets.neon_api_key }}
-          NEON_PROJECT_ID_VALUE: ${{ secrets.neon_project_id }}
-          NEON_PARENT_BRANCH_ID_VALUE: ${{ secrets.neon_parent_branch_id }}
-          PULUMI_ACCESS_TOKEN_VALUE: ${{ secrets.pulumi_access_token }}
-          BETTER_AUTH_SECRET_VALUE: ${{ secrets.better_auth_secret }}
-          JWT_SECRET_VALUE: ${{ secrets.jwt_secret }}
-          LANGFUSE_PUBLIC_KEY_VALUE: ${{ secrets.langfuse_public_key }}
-          LANGFUSE_SECRET_KEY_VALUE: ${{ secrets.langfuse_secret_key }}
         run: |
           set -euo pipefail
           write_secret_env() {

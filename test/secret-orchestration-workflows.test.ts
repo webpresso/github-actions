@@ -34,10 +34,15 @@ test('secret orchestration reusable workflows pin third-party secret-bearing act
       /dopplerhq\/secrets-fetch-action@[0-9a-f]{40}/u,
       `${file} must pin dopplerhq/secrets-fetch-action by full SHA`,
     )
+    assert.match(
+      text,
+      /dopplerhq\/cli-action@[0-9a-f]{40}/u,
+      `${file} must pin dopplerhq/cli-action by full SHA when used`,
+    )
   }
 })
 
-test('preview and production reusable workflows declare optional direct runtime secret names explicitly', () => {
+test('reusable workflows keep provider bootstrap as the only secret contract', () => {
   for (const file of workflowFiles) {
     const text = readWorkflow(file)
     for (const secretName of [
@@ -53,7 +58,7 @@ test('preview and production reusable workflows declare optional direct runtime 
       'langfuse_public_key',
       'langfuse_secret_key',
     ]) {
-      assert.match(text, new RegExp(`\\n\\s+${secretName}:\\n\\s+required: false`, 'u'))
+      assert.doesNotMatch(text, new RegExp(`\n\s+${secretName}:`, 'u'))
     }
   }
 })
