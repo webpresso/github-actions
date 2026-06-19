@@ -166,7 +166,7 @@ jobs:
 
       - name: Install Doppler CLI bridge
         if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
-        uses: dopplerhq/cli-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # pinned action family via secrets-fetch release train
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # pinned action family via secrets-fetch release train
 
       - name: Fail when CI bootstrap secret is required but missing
         if: ${{ steps.secret_gate.outputs.should_fail == 'true' }}
