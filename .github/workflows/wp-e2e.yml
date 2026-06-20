@@ -43,6 +43,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  SECRET_PROFILE_NAME: ${{ inputs.secret_env_profile }}
 
 jobs:
   e2e:
@@ -108,11 +109,20 @@ jobs:
           }
           const manager = payload?.providers?.default?.type;
           const projectId = payload?.providers?.default?.project;
+          const profiles = payload?.profiles;
           if (manager !== "doppler" && manager !== "infisical") {
             throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}. Use providers.default.type.`);
           }
           if (typeof projectId !== "string" || projectId.length === 0) {
             throw new Error(`Invalid providers.default.project in ${path}.`);
+          }
+          const profileName = process.env.SECRET_PROFILE_NAME ?? "";
+          if (profileName.length > 0) {
+            const profile = profiles?.[profileName];
+            if (!profile || typeof profile.environment !== "string" || profile.environment.length === 0) {
+              throw new Error(`Unknown secret profile "${profileName}" in ${path}.`);
+            }
+            console.log(`resolved_env_profile=${profile.environment}`);
           }
           console.log(`manager=${manager}`);
           console.log(`project_id=${projectId}`);
@@ -156,7 +166,7 @@ jobs:
         env:
           INFISICAL_DISABLE_UPDATE_CHECK: "true"
           INFISICAL_TOKEN: ${{ secrets.ci_secret_provider_token }}
-          INFISICAL_ENV_SLUG: ${{ inputs.secret_env_profile }}
+          INFISICAL_ENV_SLUG: ${{ steps.secret_config.outputs.resolved_env_profile }}
           INFISICAL_PROJECT_ID: ${{ steps.secret_config.outputs.project_id }}
         run: |
           set -euo pipefail
@@ -208,10 +218,20 @@ jobs:
             if [[ -z "${value}" ]]; then
               return 0
             fi
+            local delimiter
+            delimiter="__SECRET_ENV_$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex)
+PY
+)"
+            if [[ "$value" == *"$delimiter"* ]]; then
+              echo "Secret value for ${key} collides with generated delimiter." >&2
+              exit 1
+            fi
             {
-              echo "${key}<<__SECRET_ENV__"
+              echo "${key}<<${delimiter}"
               echo "${value}"
-              echo "__SECRET_ENV__"
+              echo "${delimiter}"
             } >> "$GITHUB_ENV"
           }
           write_secret_env "CLOUDFLARE_ACCOUNT_ID" "${CLOUDFLARE_ACCOUNT_ID_VALUE}"
@@ -225,6 +245,7 @@ jobs:
         shell: bash
         env:
           VERIFY_COMMAND: ${{ inputs.verify_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$VERIFY_COMMAND"
@@ -233,6 +254,7 @@ jobs:
         shell: bash
         env:
           E2E_COMMAND: ${{ inputs.e2e_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$E2E_COMMAND"

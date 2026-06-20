@@ -13,6 +13,9 @@ describe('secret orchestration reusable workflows', () => {
       expect(workflow).toContain('workflow_call:')
       expect(workflow).toContain('ci_secret_provider_token:')
       expect(workflow).not.toContain('secrets: inherit')
+      expect(workflow).toContain('schemaVersion !== 1')
+      expect(workflow).toContain('providers?.default?.type')
+      expect(workflow).toContain('providers?.default?.project')
     }
   })
 
@@ -41,6 +44,7 @@ describe('secret orchestration reusable workflows', () => {
     expect(cleanup).toContain('pulumi_access_token:')
     expect(cleanup).toContain('better_auth_secret:')
     expect(cleanup).toContain('langfuse_secret_key:')
+    expect(cleanup).toContain('id-token: write')
     expect(cleanup).not.toContain('secrets: inherit')
   })
 
@@ -50,5 +54,17 @@ describe('secret orchestration reusable workflows', () => {
     expect(e2e).toContain('crypto.randomUUID()')
     expect(e2e).toContain('write_secret_env "CLOUDFLARE_ACCOUNT_ID"')
     expect(e2e).toContain('write_secret_env "NEON_PARENT_BRANCH_ID"')
+    expect(e2e).toContain('resolved_env_profile')
+  })
+
+  test('preview and production do not export bootstrap tokens job-wide and use collision-safe direct secret delimiters', () => {
+    for (const workflow of [preview, production]) {
+      expect(workflow).not.toContain('SECRET_MANAGER_TOKEN<<')
+      expect(workflow).not.toContain('DOPPLER_TOKEN<<')
+      expect(workflow).not.toContain('INFISICAL_TOKEN<<')
+      expect(workflow).toContain('resolved_env_profile')
+      expect(workflow).toContain('python3 - <<\'PY\'')
+      expect(workflow).toContain('collides with generated delimiter')
+    }
   })
 })

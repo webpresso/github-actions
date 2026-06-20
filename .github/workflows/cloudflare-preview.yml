@@ -89,7 +89,7 @@ jobs:
       DEPLOY_LANE: ${{ inputs.lane }}
       DEPLOY_MODE: ${{ inputs.mode }}
       RELEASE_VERSION: ""
-      SECRET_ENV_PROFILE: ${{ inputs.secret_env_profile }}
+      SECRET_PROFILE_NAME: ${{ inputs.secret_env_profile }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -193,27 +193,29 @@ jobs:
             throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
-          const manager = payload?.manager;
-          const projectId = payload?.projectId;
+          if (payload?.schemaVersion !== 1) {
+            throw new Error(`Unsupported secret config schemaVersion in ${path}. Expected schemaVersion: 1.`);
+          }
+          const manager = payload?.providers?.default?.type;
+          const projectId = payload?.providers?.default?.project;
+          const profiles = payload?.profiles;
           if (manager !== "doppler" && manager !== "infisical") {
-            throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
+            throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}. Use providers.default.type.`);
           }
           if (typeof projectId !== "string" || projectId.length === 0) {
-            throw new Error(`Invalid projectId in ${path}.`);
+            throw new Error(`Invalid providers.default.project in ${path}.`);
+          }
+          const profileName = process.env.SECRET_PROFILE_NAME ?? "";
+          if (profileName.length > 0) {
+            const profile = profiles?.[profileName];
+            if (!profile || typeof profile.environment !== "string" || profile.environment.length === 0) {
+              throw new Error(`Unknown secret profile "${profileName}" in ${path}.`);
+            }
+            console.log(`resolved_env_profile=${profile.environment}`);
           }
           console.log(`manager=${manager}`);
           console.log(`project_id=${projectId}`);
           NODE
-
-      - name: Export generic secret-manager bootstrap token
-        if: ${{ steps.secret_gate.outputs.ready == 'true' }}
-        shell: bash
-        run: |
-          {
-            echo "SECRET_MANAGER_TOKEN<<__SECRET_MANAGER_TOKEN__"
-            echo "${{ secrets.ci_secret_provider_token }}"
-            echo "__SECRET_MANAGER_TOKEN__"
-          } >> "$GITHUB_ENV"
 
       - name: Install Doppler CLI bridge
         if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
@@ -251,7 +253,7 @@ jobs:
         env:
           INFISICAL_DISABLE_UPDATE_CHECK: "true"
           INFISICAL_TOKEN: ${{ secrets.ci_secret_provider_token }}
-          INFISICAL_ENV_SLUG: ${{ inputs.secret_env_profile }}
+          INFISICAL_ENV_SLUG: ${{ steps.secret_config.outputs.resolved_env_profile }}
           INFISICAL_PROJECT_ID: ${{ steps.secret_config.outputs.project_id }}
         run: |
           set -euo pipefail
@@ -292,15 +294,25 @@ jobs:
         run: |
           set -euo pipefail
           write_secret_env() {
-            local name="$1"
+            local key="$1"
             local value="$2"
             if [[ -z "$value" ]]; then
               return
             fi
+            local delimiter
+            delimiter="__DIRECT_SECRET_$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex)
+PY
+)"
+            if [[ "$value" == *"$delimiter"* ]]; then
+              echo "Secret value for ${key} collides with generated delimiter." >&2
+              exit 1
+            fi
             {
-              echo "${name}<<__DIRECT_SECRET__"
+              echo "${key}<<${delimiter}"
               echo "${value}"
-              echo "__DIRECT_SECRET__"
+              echo "${delimiter}"
             } >> "$GITHUB_ENV"
           }
           write_secret_env "CLOUDFLARE_ACCOUNT_ID" "${CLOUDFLARE_ACCOUNT_ID_VALUE}"
@@ -320,6 +332,7 @@ jobs:
         shell: bash
         env:
           VERIFY_COMMAND: ${{ inputs.verify_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$VERIFY_COMMAND"
@@ -335,6 +348,7 @@ jobs:
         shell: bash
         env:
           DEPLOY_COMMAND: ${{ inputs.deploy_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$DEPLOY_COMMAND"
@@ -351,6 +365,7 @@ jobs:
         shell: bash
         env:
           DESTROY_COMMAND: ${{ inputs.destroy_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$DESTROY_COMMAND"
@@ -360,6 +375,7 @@ jobs:
         shell: bash
         env:
           SMOKE_COMMAND: ${{ inputs.smoke_command }}
+          SECRET_ENV_PROFILE: ${{ steps.secret_config.outputs.resolved_env_profile }}
         run: |
           set -euo pipefail
           bash -leo pipefail -c "$SMOKE_COMMAND"
