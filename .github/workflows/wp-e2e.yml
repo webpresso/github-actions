@@ -1,4 +1,4 @@
-name: Reusable Cloudflare production deploy
+name: Reusable wp e2e
 
 on:
   workflow_call:
@@ -7,26 +7,12 @@ on:
         description: "Caller-owned install/bootstrap command block"
         required: true
         type: string
-      verify_command:
-        description: "Caller-owned verify/build command block"
+      e2e_command:
+        description: "Caller-owned E2E command block"
         required: true
-        type: string
-      deploy_command:
-        description: "Caller-owned production deploy command block"
-        required: true
-        type: string
-      smoke_command:
-        description: "Caller-owned post-deploy smoke command block"
-        required: false
-        default: ""
         type: string
       secret_profile:
         description: "Repo-owned secret-manager environment/profile slug"
-        required: false
-        default: ""
-        type: string
-      release_version:
-        description: "Optional caller-owned release gate version exported as RELEASE_VERSION"
         required: false
         default: ""
         type: string
@@ -43,20 +29,42 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  production:
+  e2e:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       packages: read
       id-token: write
     env:
-      DEPLOY_LANE: prd
-      RELEASE_VERSION: ${{ inputs.release_version }}
       SECRET_PROFILE: ${{ inputs.secret_profile }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate CI bootstrap secret availability
+        id: secret_gate
+        shell: bash
+        env:
+          TOKEN_PRESENT: ${{ secrets.ci_secret_provider_token != '' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "${TOKEN_PRESENT}" == "true" ]]; then
+            {
+              echo "ready=true"
+              echo "should_fail=false"
+              echo "skipped=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "ready=false"
+            echo "should_fail=true"
+            echo "skipped=false"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve caller pnpm version
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         id: pnpm
         shell: bash
         run: |
@@ -67,22 +75,25 @@ jobs:
           const packageManager = typeof manifest.packageManager === "string" ? manifest.packageManager : "";
           const match = /^pnpm@(.+)$/u.exec(packageManager);
           if (!match) {
-            throw new Error('package.json must declare packageManager like "pnpm@<version>" for the shared deploy harness.');
+            throw new Error('package.json must declare packageManager like "pnpm@<version>" for the shared e2e harness.');
           }
           console.log(`version=${match[1]}`);
           NODE
 
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         with:
           version: ${{ steps.pnpm.outputs.version }}
           run_install: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         with:
           node-version: "24.16.0"
           cache: pnpm
 
       - name: Enable Corepack + caller pnpm
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,10 +101,12 @@ jobs:
           corepack prepare "pnpm@${{ steps.pnpm.outputs.version }}" --activate
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         with:
           bun-version: latest
 
       - name: Read committed secret-manager metadata
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         id: secret_config
         shell: bash
         run: |
@@ -102,7 +115,7 @@ jobs:
           const fs = require("node:fs");
           const path = ".webpresso/secrets.config.json";
           if (!fs.existsSync(path)) {
-            throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
+            throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared e2e harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
           let environment = process.env.SECRET_PROFILE || "";
@@ -110,7 +123,7 @@ jobs:
             throw new Error(`Unsupported secrets config in ${path}. Expected schemaVersion: 1.`);
           }
           {
-            const profileName = environment || "production";
+            const profileName = environment || "preview";
             const profile = payload?.profiles?.[profileName];
             const provider = profile ? payload?.providers?.[profile.provider] : payload?.providers?.default;
             const manager = provider?.type;
@@ -129,21 +142,16 @@ jobs:
           NODE
 
 
-
       - name: Install Doppler CLI bridge
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
-        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # pinned action family via secrets-fetch release train
 
-      - name: Require explicit CI bootstrap secret
+      - name: Fail when CI bootstrap secret is required but missing
+        if: ${{ steps.secret_gate.outputs.should_fail == 'true' }}
         shell: bash
-        env:
-          TOKEN_PRESENT: ${{ secrets.ci_secret_provider_token != '' && 'true' || 'false' }}
         run: |
-          set -euo pipefail
-          if [[ "${TOKEN_PRESENT}" != "true" ]]; then
-            echo "Missing required reusable-workflow secret: ci_secret_provider_token" >&2
-            exit 1
-          fi
+          echo "Missing required reusable-workflow secret: ci_secret_provider_token" >&2
+          exit 1
 
       - name: Install global wp CLI
         shell: bash
@@ -159,6 +167,7 @@ jobs:
           wp --version
 
       - name: Install caller dependencies
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -169,14 +178,14 @@ jobs:
           bash -leo pipefail -c "$INSTALL_COMMAND"
 
       - name: Inject Doppler-managed runtime secrets
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'doppler' }}
         uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         with:
           doppler-token: ${{ secrets.ci_secret_provider_token }}
           inject-env-vars: true
 
       - name: Inject Infisical-managed runtime secrets
-        if: ${{ steps.secret_config.outputs.manager == 'infisical' }}
+        if: ${{ steps.secret_gate.outputs.ready == 'true' && steps.secret_config.outputs.manager == 'infisical' }}
         shell: bash
         env:
           INFISICAL_DISABLE_UPDATE_CHECK: "true"
@@ -209,27 +218,16 @@ jobs:
           NODE
 
 
-      - name: Run caller verify block
+      - name: Run caller e2e command
+        if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
         env:
-          VERIFY_COMMAND: ${{ inputs.verify_command }}
+          E2E_COMMAND: ${{ inputs.e2e_command }}
         run: |
           set -euo pipefail
-          bash -leo pipefail -c "$VERIFY_COMMAND"
+          bash -leo pipefail -c "$E2E_COMMAND"
 
-      - name: Run caller deploy block
+      - name: Skip e2e when CI bootstrap secret is unavailable
+        if: ${{ steps.secret_gate.outputs.skipped == 'true' }}
         shell: bash
-        env:
-          DEPLOY_COMMAND: ${{ inputs.deploy_command }}
-        run: |
-          set -euo pipefail
-          bash -leo pipefail -c "$DEPLOY_COMMAND"
-
-      - name: Run caller smoke block
-        if: ${{ inputs.smoke_command != '' }}
-        shell: bash
-        env:
-          SMOKE_COMMAND: ${{ inputs.smoke_command }}
-        run: |
-          set -euo pipefail
-          bash -leo pipefail -c "$SMOKE_COMMAND"
+        run: echo "ci_secret_provider_token is not configured; skipping e2e suite."

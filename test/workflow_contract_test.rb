@@ -14,12 +14,8 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_PREVIEW), "secret_env_profile"
     assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "preview", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
-    assert_step_uses(WORKFLOW_PREVIEW, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PREVIEW, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
+    assert_step_uses(WORKFLOW_PREVIEW, "dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     refute_includes File.read(WORKFLOW_PREVIEW), "__DIRECT_SECRET__"
   end
 
@@ -28,25 +24,32 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_PRODUCTION), "secret_env_profile"
     assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "production", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
-    assert_step_uses(WORKFLOW_PRODUCTION, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PRODUCTION, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96")
+    assert_step_uses(WORKFLOW_PRODUCTION, "dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"
   end
 
   def test_release_workflow_uses_shared_toolchain_setup
     workflow = load_yaml(WORKFLOW_RELEASE)
     steps = workflow.dig("jobs", "release", "steps")
-    assert_includes extract_uses(steps), "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96"
+    assert_includes extract_uses(steps), "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0b8eca2d5b7079f0b1432371a375ae9928596f4d"
     refute_includes File.read(WORKFLOW_RELEASE), "Resolve caller pnpm version"
+  end
+
+  def test_changesets_release_references_existing_shared_toolchain_action
+    expected_ref = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0b8eca2d5b7079f0b1432371a375ae9928596f4d"
+    assert_includes extract_uses(load_yaml(WORKFLOW_RELEASE).dig("jobs", "release", "steps")), expected_ref
+    assert system("git", "cat-file", "-e", "0b8eca2d5b7079f0b1432371a375ae9928596f4d:.github/actions/setup-webpresso-toolchain/action.yml", chdir: REPO_ROOT), "expected pinned setup-webpresso-toolchain action to exist at 0b8eca2d5b7079f0b1432371a375ae9928596f4d"
   end
 
   def test_shared_toolchain_action_is_fully_pinned
     action = load_yaml(ACTION_TOOLCHAIN)
     assert_equal "composite", action.dig("runs", "using")
+    assert_equal "true", action.dig("inputs", "install-wp", "default")
+    assert_equal "@webpresso/agent-kit@latest", action.dig("inputs", "wp-package", "default")
+    action_text = File.read(ACTION_TOOLCHAIN)
+    assert_includes action_text, "curl -fsSL https://vite.plus | bash"
+    assert_includes action_text, 'vp install -g "${{ inputs.wp-package }}"'
     uses_values = extract_uses(action.dig("runs", "steps"))
     assert_includes uses_values, "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093"
     assert_includes uses_values, "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"

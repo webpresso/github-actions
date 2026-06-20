@@ -5,12 +5,13 @@ Public reusable GitHub Actions workflows for Webpresso consumer repositories.
 Current workflows:
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
-- `.github/actions/setup-webpresso-toolchain/action.yml`
+- `.github/workflows/wp-e2e.yml`
+- `.github/workflows/wp-cleanup-preview.yml`
+- `.github/workflows/wp-secret-orchestration-smoke.yml`
 
 Consumers should pin reusable workflow references by full commit SHA.
 
-Security contract:
-- reusable deployment workflows use repo-owned secret profiles plus provider-specific bootstrap
-- Doppler callers may pass `ci_secret_provider_token` (for example preview / production config tokens) or a non-secret OIDC identity ID
-- Infisical callers use OIDC identity IDs
-- secret-bearing third-party actions are pinned by full commit SHA
+Secret orchestration contract:
+- Consumers pass repo-owned secret profiles through `secret_profile`.
+- Consumers pass provider bootstrap through `ci_secret_provider_token`; reusable workflows fail closed when it is missing.
+- Consumers should pin reusable workflow references by full commit SHA.

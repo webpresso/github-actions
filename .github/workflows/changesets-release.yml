@@ -60,9 +60,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0b8eca2d5b7079f0b1432371a375ae9928596f4d
         with:
           package-manager-cache: "false"
+
+      - name: Install global wp CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v vp >/dev/null 2>&1; then
+            curl -fsSL https://vite.plus | bash
+            export PATH="$HOME/.vite-plus/bin:$PATH"
+            echo "$HOME/.vite-plus/bin" >> "$GITHUB_PATH"
+          fi
+          vp install -g "@webpresso/agent-kit@latest"
+          vp --version
+          wp --version
 
       - name: Install caller dependencies
         shell: bash
