@@ -63,6 +63,18 @@ class WorkflowContractTest < Minitest::Test
     end
   end
 
+
+  def test_deploy_workflows_skip_provider_fetch_when_direct_secrets_are_supplied
+    [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
+      contents = File.read(path)
+      assert_includes contents, "id: direct_secrets"
+      assert_includes contents, "DIRECT_SECRETS_PRESENT: ${{ steps.direct_secrets.outputs.present }}"
+      assert_includes contents, "steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler'"
+      assert_includes contents, "steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'infisical'"
+      assert_includes contents, 'if [[ "${DIRECT_SECRETS_PRESENT}" != "true" && "${TOKEN_PRESENT}" != "true" && -z "${DOPPLER_IDENTITY_ID}" ]]; then'
+    end
+  end
+
   def test_deploy_workflows_accept_legacy_secret_metadata_without_profiles
     [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
       contents = File.read(path)
