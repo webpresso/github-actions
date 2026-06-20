@@ -49,6 +49,7 @@ describe('secret orchestration reusable workflows', () => {
   })
 
   test('wp-e2e masks Infisical secrets safely and exports declared direct runtime secrets', () => {
+    expect(e2e).toContain('- name: Install Infisical CLI')
     expect(e2e).toContain("trap 'rm -f \"$tmp_json\"' EXIT")
     expect(e2e).toContain('::add-mask::')
     expect(e2e).toContain('crypto.randomUUID()')
@@ -62,7 +63,9 @@ describe('secret orchestration reusable workflows', () => {
       expect(workflow).not.toContain('SECRET_MANAGER_TOKEN<<')
       expect(workflow).not.toContain('DOPPLER_TOKEN<<')
       expect(workflow).not.toContain('INFISICAL_TOKEN<<')
+      expect(workflow).toContain('- name: Install Infisical CLI')
       expect(workflow).toContain('resolved_env_profile')
+      expect(workflow).toContain("printf '%s<<%s\\n'")
       expect(workflow).toContain("python3 -c 'import uuid; print(uuid.uuid4().hex)'")
       expect(workflow).toContain('collides with generated delimiter')
     }
