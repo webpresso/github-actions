@@ -1,7 +1,8 @@
 name: Set up Webpresso workflow toolchain
 description: >
   Resolve the caller's pnpm version, install pnpm, configure Node.js and
-  Corepack, and optionally install Bun.
+  Corepack, optionally install Bun, and optionally install the global wp CLI
+  through vp.
 inputs:
   node-version:
     description: "Node.js version to install"
@@ -76,4 +77,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if ! command -v vp >/dev/null 2>&1; then
+          curl -fsSL https://vite.plus | bash
+          export PATH="$HOME/.vite-plus/bin:$PATH"
+          echo "$HOME/.vite-plus/bin" >> "$GITHUB_PATH"
+        fi
         vp install -g "${{ inputs.wp-package }}"
+        vp --version
+        wp --version
