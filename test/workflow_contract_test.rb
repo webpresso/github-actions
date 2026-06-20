@@ -32,14 +32,14 @@ class WorkflowContractTest < Minitest::Test
   def test_release_workflow_uses_shared_toolchain_setup
     workflow = load_yaml(WORKFLOW_RELEASE)
     steps = workflow.dig("jobs", "release", "steps")
-    assert_includes extract_uses(steps), "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@902a408984e021687ff00b5518c88574ae0073ee"
+    assert_includes extract_uses(steps), "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0b8eca2d5b7079f0b1432371a375ae9928596f4d"
     refute_includes File.read(WORKFLOW_RELEASE), "Resolve caller pnpm version"
   end
 
   def test_changesets_release_references_existing_shared_toolchain_action
-    expected_ref = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@902a408984e021687ff00b5518c88574ae0073ee"
+    expected_ref = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0b8eca2d5b7079f0b1432371a375ae9928596f4d"
     assert_includes extract_uses(load_yaml(WORKFLOW_RELEASE).dig("jobs", "release", "steps")), expected_ref
-    assert system("git", "cat-file", "-e", "902a408984e021687ff00b5518c88574ae0073ee:.github/actions/setup-webpresso-toolchain/action.yml", chdir: REPO_ROOT), "expected pinned setup-webpresso-toolchain action to exist at 902a408984e021687ff00b5518c88574ae0073ee"
+    assert system("git", "cat-file", "-e", "0b8eca2d5b7079f0b1432371a375ae9928596f4d:.github/actions/setup-webpresso-toolchain/action.yml", chdir: REPO_ROOT), "expected pinned setup-webpresso-toolchain action to exist at 0b8eca2d5b7079f0b1432371a375ae9928596f4d"
   end
 
   def test_shared_toolchain_action_is_fully_pinned
