@@ -85,10 +85,23 @@ jobs:
       DEPLOY_LANE: prd
       RELEASE_VERSION: ${{ inputs.release_version }}
       SECRET_PROFILE: ${{ inputs.secret_profile }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_api_token }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.cloudflare_zone_id }}
+      NEON_API_KEY: ${{ secrets.neon_api_key }}
+      NEON_PROJECT_ID: ${{ secrets.neon_project_id }}
+      NEON_PARENT_BRANCH_ID: ${{ secrets.neon_parent_branch_id }}
+      PULUMI_ACCESS_TOKEN: ${{ secrets.pulumi_access_token }}
+      BETTER_AUTH_SECRET: ${{ secrets.better_auth_secret }}
+      JWT_SECRET: ${{ secrets.jwt_secret }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.langfuse_public_key }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.langfuse_secret_key }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@9f4e8ef01c883c1a19bb6f54a0f2356e15fe2b96
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+        with:
+          cli-global-packages: "vite-plus @webpresso/agent-kit"
 
       - name: Read committed secret-manager metadata
         id: secret_config
@@ -105,8 +118,10 @@ jobs:
           const manager = payload?.manager;
           const projectId = payload?.projectId;
           const secretProfile = process.env.SECRET_PROFILE ?? "";
-          const profile = payload?.profiles?.[secretProfile];
-          const environment = profile?.environment;
+          const profiles = payload?.profiles;
+          const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);
+          const profile = hasProfiles ? profiles[secretProfile] : undefined;
+          const environment = hasProfiles ? profile?.environment : secretProfile;
           if (manager !== "doppler" && manager !== "infisical") {
             throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
           }
@@ -123,6 +138,17 @@ jobs:
           console.log(`project_id=${projectId}`);
           console.log(`secret_environment=${environment}`);
           NODE
+
+      - name: Detect direct deploy secrets
+        id: direct_secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${CLOUDFLARE_ACCOUNT_ID}" || -n "${CLOUDFLARE_API_TOKEN}" || -n "${CLOUDFLARE_ZONE_ID}" || -n "${NEON_API_KEY}" || -n "${NEON_PROJECT_ID}" || -n "${NEON_PARENT_BRANCH_ID}" || -n "${PULUMI_ACCESS_TOKEN}" || -n "${BETTER_AUTH_SECRET}" || -n "${JWT_SECRET}" || -n "${LANGFUSE_PUBLIC_KEY}" || -n "${LANGFUSE_SECRET_KEY}" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Detect optional Doppler bootstrap token
         id: doppler_token
@@ -142,6 +168,7 @@ jobs:
         env:
           SECRET_MANAGER: ${{ steps.secret_config.outputs.manager }}
           TOKEN_PRESENT: ${{ steps.doppler_token.outputs.present }}
+          DIRECT_SECRETS_PRESENT: ${{ steps.direct_secrets.outputs.present }}
           DOPPLER_IDENTITY_ID: ${{ inputs.doppler_identity_id }}
           INFISICAL_IDENTITY_ID: ${{ inputs.infisical_identity_id }}
           SECRET_PROFILE: ${{ inputs.secret_profile }}
@@ -149,7 +176,7 @@ jobs:
           set -euo pipefail
           case "${SECRET_MANAGER}" in
             doppler)
-              if [[ "${TOKEN_PRESENT}" != "true" && -z "${DOPPLER_IDENTITY_ID}" ]]; then
+              if [[ "${DIRECT_SECRETS_PRESENT}" != "true" && "${TOKEN_PRESENT}" != "true" && -z "${DOPPLER_IDENTITY_ID}" ]]; then
                 echo "Doppler bootstrap requires either workflow_call secret ci_secret_provider_token or input doppler_identity_id." >&2
                 exit 1
               fi
@@ -171,14 +198,14 @@ jobs:
           esac
 
       - name: Fetch Doppler-managed runtime secrets via token
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'true' }}
+        if: ${{ steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'true' }}
         uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           doppler-token: ${{ secrets.ci_secret_provider_token }}
           inject-env-vars: true
 
       - name: Fetch Doppler-managed runtime secrets via OIDC
-        if: ${{ steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'false' }}
+        if: ${{ steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'false' }}
         uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           auth-method: oidc
@@ -188,7 +215,7 @@ jobs:
           inject-env-vars: true
 
       - name: Fetch Infisical-managed runtime secrets via OIDC
-        if: ${{ steps.secret_config.outputs.manager == 'infisical' }}
+        if: ${{ steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'infisical' }}
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: "oidc"
