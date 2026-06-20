@@ -40,6 +40,29 @@ class WorkflowContractTest < Minitest::Test
   end
 
 
+
+  def test_deploy_workflows_map_direct_secret_inputs_to_job_env
+    { WORKFLOW_PREVIEW => "preview", WORKFLOW_PRODUCTION => "production" }.each do |path, job_name|
+      workflow = load_yaml(path)
+      env = workflow.dig("jobs", job_name, "env")
+      {
+        "CLOUDFLARE_ACCOUNT_ID" => "${{ secrets.cloudflare_account_id }}",
+        "CLOUDFLARE_API_TOKEN" => "${{ secrets.cloudflare_api_token }}",
+        "CLOUDFLARE_ZONE_ID" => "${{ secrets.cloudflare_zone_id }}",
+        "NEON_API_KEY" => "${{ secrets.neon_api_key }}",
+        "NEON_PROJECT_ID" => "${{ secrets.neon_project_id }}",
+        "NEON_PARENT_BRANCH_ID" => "${{ secrets.neon_parent_branch_id }}",
+        "PULUMI_ACCESS_TOKEN" => "${{ secrets.pulumi_access_token }}",
+        "BETTER_AUTH_SECRET" => "${{ secrets.better_auth_secret }}",
+        "JWT_SECRET" => "${{ secrets.jwt_secret }}",
+        "LANGFUSE_PUBLIC_KEY" => "${{ secrets.langfuse_public_key }}",
+        "LANGFUSE_SECRET_KEY" => "${{ secrets.langfuse_secret_key }}",
+      }.each do |name, expression|
+        assert_equal expression, env.fetch(name), "#{path} should expose direct secret #{name}"
+      end
+    end
+  end
+
   def test_deploy_workflows_accept_legacy_secret_metadata_without_profiles
     [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
       contents = File.read(path)
