@@ -39,6 +39,16 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"
   end
 
+
+  def test_deploy_workflows_accept_legacy_secret_metadata_without_profiles
+    [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
+      contents = File.read(path)
+      assert_includes contents, 'const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);'
+      assert_includes contents, 'const environment = hasProfiles ? profile?.environment : secretProfile;'
+      assert_includes contents, 'Unknown secret profile "${secretProfile}"'
+    end
+  end
+
   def test_release_workflow_uses_shared_toolchain_setup
     workflow = load_yaml(WORKFLOW_RELEASE)
     steps = workflow.dig("jobs", "release", "steps")

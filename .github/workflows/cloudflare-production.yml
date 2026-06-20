@@ -107,8 +107,10 @@ jobs:
           const manager = payload?.manager;
           const projectId = payload?.projectId;
           const secretProfile = process.env.SECRET_PROFILE ?? "";
-          const profile = payload?.profiles?.[secretProfile];
-          const environment = profile?.environment;
+          const profiles = payload?.profiles;
+          const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);
+          const profile = hasProfiles ? profiles[secretProfile] : undefined;
+          const environment = hasProfiles ? profile?.environment : secretProfile;
           if (manager !== "doppler" && manager !== "infisical") {
             throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
           }
