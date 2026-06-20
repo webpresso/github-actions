@@ -40,9 +40,23 @@ on:
         required: false
       neon_parent_branch_id:
         required: false
+      pulumi_access_token:
+        required: false
+      better_auth_secret:
+        required: false
+      jwt_secret:
+        required: false
+      langfuse_public_key:
+        required: false
+      langfuse_secret_key:
+        required: false
 
 jobs:
   cleanup:
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
     uses: ./.github/workflows/cloudflare-preview.yml
     with:
       lane: ${{ inputs.lane }}
@@ -63,3 +77,8 @@ jobs:
       neon_api_key: ${{ secrets.neon_api_key }}
       neon_project_id: ${{ secrets.neon_project_id }}
       neon_parent_branch_id: ${{ secrets.neon_parent_branch_id }}
+      pulumi_access_token: ${{ secrets.pulumi_access_token }}
+      better_auth_secret: ${{ secrets.better_auth_secret }}
+      jwt_secret: ${{ secrets.jwt_secret }}
+      langfuse_public_key: ${{ secrets.langfuse_public_key }}
+      langfuse_secret_key: ${{ secrets.langfuse_secret_key }}
