@@ -60,6 +60,37 @@ class WorkflowContractTest < Minitest::Test
     end
   end
 
+
+  def test_shared_ci_and_security_do_not_duplicate_cli_global_install_blocks
+    [WORKFLOW_CI, WORKFLOW_SECURITY].each do |path|
+      contents = File.read(path)
+      refute_includes contents, "/tmp/webpresso-cli-globals", "#{path} should use setup-webpresso-toolchain cli-global-packages instead of temp-file bootstrap"
+      refute_match(/npm\s+install\s+-g\s+\$\(cat\s+[^)]*\)/, contents, "#{path} should not install globals from cat output inline")
+    end
+
+    ci = load_yaml(WORKFLOW_CI)
+    ci_toolchain_steps = all_steps(ci).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209" }
+    assert_equal 4, ci_toolchain_steps.length
+    ci_toolchain_steps.each do |step|
+      assert_equal "vite-plus @webpresso/agent-kit", step.dig("with", "cli-global-packages")
+    end
+
+    security = load_yaml(WORKFLOW_SECURITY)
+    security_toolchain_steps = all_steps(security).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209" }
+    assert_equal 1, security_toolchain_steps.length
+    assert_equal "vite-plus @webpresso/agent-kit", security_toolchain_steps.first.dig("with", "cli-global-packages")
+  end
+
+  def test_all_workflow_and_action_uses_are_full_sha_pins
+    Dir.glob(File.join(REPO_ROOT, ".github", "{workflows,actions}", "**", "*.yml")).each do |path|
+      uses_values = all_uses(load_yaml(path))
+      uses_values.each do |value|
+        next if value.start_with?("./")
+        assert_match(/@[a-f0-9]{40}\z/, value, "expected full SHA pin for #{value} in #{path}")
+      end
+    end
+  end
+
   def test_readme_describes_oidc_only_contract
     readme = File.read(File.join(REPO_ROOT, "README.md"))
     assert_includes readme, "repo-owned secret profiles"
@@ -98,6 +129,26 @@ class WorkflowContractTest < Minitest::Test
 
   def extract_uses(steps)
     Array(steps).map { |step| step["uses"] }.compact
+  end
+
+
+  def all_steps(workflow)
+    workflow.fetch("jobs").values.flat_map do |job|
+      Array(job["steps"])
+    end
+  end
+
+  def all_uses(node)
+    case node
+    when Hash
+      node.flat_map do |key, value|
+        key == "uses" ? [value] : all_uses(value)
+      end
+    when Array
+      node.flat_map { |value| all_uses(value) }
+    else
+      []
+    end.compact
   end
 
   def assert_step_uses(path, expected_uses)

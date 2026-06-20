@@ -48,25 +48,8 @@ jobs:
           fetch-depth: 0
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
-
-      - name: Install caller CLI globals
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE' > /tmp/webpresso-cli-globals
-          const fs = require('node:fs')
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-          const dev = pkg.devDependencies ?? {}
-          const specs = []
-          const vp = dev['vite-plus']
-          const ak = dev['@webpresso/agent-kit']
-          if (typeof vp === 'string' && vp && vp !== 'catalog:' && !vp.startsWith('workspace:')) specs.push(`vite-plus@${vp}`)
-          if (typeof ak === 'string' && ak && ak !== 'catalog:' && !ak.startsWith('workspace:')) specs.push(`@webpresso/agent-kit@${ak}`)
-          process.stdout.write(specs.join(' '))
-          NODE
-          if [[ -s /tmp/webpresso-cli-globals ]]; then
-            npm install -g $(cat /tmp/webpresso-cli-globals)
-          fi
+        with:
+          cli-global-packages: "vite-plus @webpresso/agent-kit"
 
       - name: Install caller dependencies
         shell: bash
@@ -96,24 +79,8 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
-      - name: Install caller CLI globals
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE' > /tmp/webpresso-cli-globals
-          const fs = require('node:fs')
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-          const dev = pkg.devDependencies ?? {}
-          const specs = []
-          const vp = dev['vite-plus']
-          const ak = dev['@webpresso/agent-kit']
-          if (typeof vp === 'string' && vp && vp !== 'catalog:' && !vp.startsWith('workspace:')) specs.push(`vite-plus@${vp}`)
-          if (typeof ak === 'string' && ak && ak !== 'catalog:' && !ak.startsWith('workspace:')) specs.push(`@webpresso/agent-kit@${ak}`)
-          process.stdout.write(specs.join(' '))
-          NODE
-          if [[ -s /tmp/webpresso-cli-globals ]]; then
-            npm install -g $(cat /tmp/webpresso-cli-globals)
-          fi
+        with:
+          cli-global-packages: "vite-plus @webpresso/agent-kit"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -141,24 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
-      - name: Install caller CLI globals
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE' > /tmp/webpresso-cli-globals
-          const fs = require('node:fs')
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-          const dev = pkg.devDependencies ?? {}
-          const specs = []
-          const vp = dev['vite-plus']
-          const ak = dev['@webpresso/agent-kit']
-          if (typeof vp === 'string' && vp && vp !== 'catalog:' && !vp.startsWith('workspace:')) specs.push(`vite-plus@${vp}`)
-          if (typeof ak === 'string' && ak && ak !== 'catalog:' && !ak.startsWith('workspace:')) specs.push(`@webpresso/agent-kit@${ak}`)
-          process.stdout.write(specs.join(' '))
-          NODE
-          if [[ -s /tmp/webpresso-cli-globals ]]; then
-            npm install -g $(cat /tmp/webpresso-cli-globals)
-          fi
+        with:
+          cli-global-packages: "vite-plus @webpresso/agent-kit"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -186,24 +137,8 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
-      - name: Install caller CLI globals
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE' > /tmp/webpresso-cli-globals
-          const fs = require('node:fs')
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-          const dev = pkg.devDependencies ?? {}
-          const specs = []
-          const vp = dev['vite-plus']
-          const ak = dev['@webpresso/agent-kit']
-          if (typeof vp === 'string' && vp && vp !== 'catalog:' && !vp.startsWith('workspace:')) specs.push(`vite-plus@${vp}`)
-          if (typeof ak === 'string' && ak && ak !== 'catalog:' && !ak.startsWith('workspace:')) specs.push(`@webpresso/agent-kit@${ak}`)
-          process.stdout.write(specs.join(' '))
-          NODE
-          if [[ -s /tmp/webpresso-cli-globals ]]; then
-            npm install -g $(cat /tmp/webpresso-cli-globals)
-          fi
+        with:
+          cli-global-packages: "vite-plus @webpresso/agent-kit"
       - name: Install caller dependencies
         shell: bash
         env:
