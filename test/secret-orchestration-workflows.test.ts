@@ -63,7 +63,7 @@ describe('secret orchestration reusable workflows', () => {
       expect(workflow).not.toContain('DOPPLER_TOKEN<<')
       expect(workflow).not.toContain('INFISICAL_TOKEN<<')
       expect(workflow).toContain('resolved_env_profile')
-      expect(workflow).toContain('python3 - <<\'PY\'')
+      expect(workflow).toContain("python3 -c 'import uuid; print(uuid.uuid4().hex)'")
       expect(workflow).toContain('collides with generated delimiter')
     }
   })

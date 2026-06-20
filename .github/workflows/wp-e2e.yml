@@ -219,11 +219,7 @@ jobs:
               return 0
             fi
             local delimiter
-            delimiter="__SECRET_ENV_$(python3 - <<'PY'
-import uuid
-print(uuid.uuid4().hex)
-PY
-)"
+            delimiter="__SECRET_ENV_$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
             if [[ "$value" == *"$delimiter"* ]]; then
               echo "Secret value for ${key} collides with generated delimiter." >&2
               exit 1
