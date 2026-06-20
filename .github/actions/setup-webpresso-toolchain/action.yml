@@ -15,6 +15,14 @@ inputs:
     description: "Whether to install Bun"
     required: false
     default: "true"
+  install-wp:
+    description: "Whether to install the global wp CLI"
+    required: false
+    default: "true"
+  wp-package:
+    description: "Package spec that provides the global wp CLI"
+    required: false
+    default: "@webpresso/agent-kit@latest"
 runs:
   using: composite
   steps:
@@ -62,3 +70,10 @@ runs:
       if: ${{ inputs.install-bun == 'true' }}
       with:
         bun-version: latest
+
+    - name: Install global wp CLI
+      if: ${{ inputs.install-wp == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        vp install -g "${{ inputs.wp-package }}"

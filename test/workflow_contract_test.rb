@@ -45,6 +45,8 @@ class WorkflowContractTest < Minitest::Test
   def test_shared_toolchain_action_is_fully_pinned
     action = load_yaml(ACTION_TOOLCHAIN)
     assert_equal "composite", action.dig("runs", "using")
+    assert_equal "true", action.dig("inputs", "install-wp", "default")
+    assert_equal "@webpresso/agent-kit@latest", action.dig("inputs", "wp-package", "default")
     uses_values = extract_uses(action.dig("runs", "steps"))
     assert_includes uses_values, "pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093"
     assert_includes uses_values, "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"

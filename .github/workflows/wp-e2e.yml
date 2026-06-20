@@ -153,6 +153,19 @@ jobs:
           echo "Missing required reusable-workflow secret: ci_secret_provider_token" >&2
           exit 1
 
+      - name: Install global wp CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v vp >/dev/null 2>&1; then
+            curl -fsSL https://vite.plus | bash
+            export PATH="$HOME/.vite-plus/bin:$PATH"
+            echo "$HOME/.vite-plus/bin" >> "$GITHUB_PATH"
+          fi
+          vp install -g "@webpresso/agent-kit@latest"
+          vp --version
+          wp --version
+
       - name: Install caller dependencies
         if: ${{ steps.secret_gate.outputs.skipped != 'true' }}
         shell: bash
