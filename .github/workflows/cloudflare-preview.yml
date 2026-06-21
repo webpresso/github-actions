@@ -140,18 +140,22 @@ jobs:
             throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
-          const manager = payload?.manager;
-          const projectId = payload?.projectId;
+          if (payload?.schemaVersion !== 1) {
+            throw new Error(`Invalid ${path}. Expected schemaVersion 1 secret metadata.`);
+          }
+          const defaultProvider = payload?.providers?.default;
+          const manager = defaultProvider?.type;
+          const projectId = defaultProvider?.project;
           const secretProfile = process.env.SECRET_PROFILE ?? "";
           const profiles = payload?.profiles;
           const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);
           const profile = hasProfiles ? profiles[secretProfile] : undefined;
           const environment = hasProfiles ? profile?.environment : secretProfile;
           if (manager !== "doppler" && manager !== "infisical") {
-            throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
+            throw new Error(`Unsupported providers.default.type "${String(manager)}" in ${path}.`);
           }
           if (typeof projectId !== "string" || projectId.length === 0) {
-            throw new Error(`Invalid projectId in ${path}.`);
+            throw new Error(`Invalid providers.default.project in ${path}.`);
           }
           if (typeof secretProfile !== "string" || secretProfile.length === 0) {
             throw new Error(`Missing workflow_call input secret_profile.`);
