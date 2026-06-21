@@ -99,9 +99,9 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@17b626bc3b6157e9919e1204fe263047093e3438
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.3.2"
 
       - name: Read committed secret-manager metadata
         id: secret_config
@@ -115,18 +115,22 @@ jobs:
             throw new Error(`Missing ${path}. Commit repo secret-manager metadata before using the shared deploy harness.`);
           }
           const payload = JSON.parse(fs.readFileSync(path, "utf8"));
-          const manager = payload?.manager;
-          const projectId = payload?.projectId;
+          if (payload?.schemaVersion !== 1) {
+            throw new Error(`Invalid ${path}. Expected schemaVersion 1 secret metadata.`);
+          }
+          const defaultProvider = payload?.providers?.default;
+          const manager = defaultProvider?.type;
+          const projectId = defaultProvider?.project;
           const secretProfile = process.env.SECRET_PROFILE ?? "";
           const profiles = payload?.profiles;
           const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);
           const profile = hasProfiles ? profiles[secretProfile] : undefined;
           const environment = hasProfiles ? profile?.environment : secretProfile;
           if (manager !== "doppler" && manager !== "infisical") {
-            throw new Error(`Unsupported secret manager "${String(manager)}" in ${path}.`);
+            throw new Error(`Unsupported providers.default.type "${String(manager)}" in ${path}.`);
           }
           if (typeof projectId !== "string" || projectId.length === 0) {
-            throw new Error(`Invalid projectId in ${path}.`);
+            throw new Error(`Invalid providers.default.project in ${path}.`);
           }
           if (typeof secretProfile !== "string" || secretProfile.length === 0) {
             throw new Error(`Missing workflow_call input secret_profile.`);
