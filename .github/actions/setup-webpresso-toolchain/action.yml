@@ -83,7 +83,14 @@ runs:
         const ranges = { ...(manifest.dependencies ?? {}), ...(manifest.devDependencies ?? {}) };
         const requested = (process.env.CLI_GLOBAL_PACKAGES ?? "").split(/\s+/u).filter(Boolean);
         const specs = [];
+        function hasExplicitVersionSpec(name) {
+          return name.startsWith("@") ? name.indexOf("@", 1) !== -1 : name.includes("@");
+        }
         for (const name of requested) {
+          if (hasExplicitVersionSpec(name)) {
+            specs.push(name);
+            continue;
+          }
           const range = ranges[name];
           if (typeof range !== "string" || range === "") continue;
           if (range === "catalog:" || range.startsWith("workspace:") || range.startsWith("link:")) continue;

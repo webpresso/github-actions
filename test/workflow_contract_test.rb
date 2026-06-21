@@ -97,6 +97,13 @@ class WorkflowContractTest < Minitest::Test
     refute_includes File.read(WORKFLOW_RELEASE), "Resolve caller pnpm version"
   end
 
+  def test_shared_toolchain_action_accepts_explicit_global_cli_specs
+    contents = File.read(ACTION_TOOLCHAIN)
+
+    assert_includes contents, "function hasExplicitVersionSpec(name)"
+    assert_includes contents, "specs.push(name);"
+  end
+
   def test_shared_toolchain_action_is_fully_pinned
     action = load_yaml(ACTION_TOOLCHAIN)
     assert_equal "composite", action.dig("runs", "using")
