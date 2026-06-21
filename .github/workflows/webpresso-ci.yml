@@ -47,9 +47,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@17b626bc3b6157e9919e1204fe263047093e3438
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.3.2"
 
       - name: Install caller dependencies
         shell: bash
@@ -78,9 +78,9 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@17b626bc3b6157e9919e1204fe263047093e3438
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.3.2"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -107,9 +107,9 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@17b626bc3b6157e9919e1204fe263047093e3438
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.3.2"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -136,9 +136,9 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@17b626bc3b6157e9919e1204fe263047093e3438
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.3.2"
       - name: Install caller dependencies
         shell: bash
         env:
