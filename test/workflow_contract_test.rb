@@ -78,6 +78,12 @@ class WorkflowContractTest < Minitest::Test
   def test_deploy_workflows_accept_legacy_secret_metadata_without_profiles
     [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
       contents = File.read(path)
+      assert_includes contents, 'if (payload?.schemaVersion === 1) {'
+      assert_includes contents, 'const defaultProvider = payload?.providers?.default;'
+      assert_includes contents, 'manager = defaultProvider?.type;'
+      assert_includes contents, 'projectId = defaultProvider?.project;'
+      assert_includes contents, 'manager = payload?.manager;'
+      assert_includes contents, 'projectId = payload?.projectId;'
       assert_includes contents, 'const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);'
       assert_includes contents, 'const environment = hasProfiles ? profile?.environment : secretProfile;'
       assert_includes contents, 'Unknown secret profile "${secretProfile}"'
