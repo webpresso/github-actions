@@ -124,7 +124,7 @@ jobs:
           }
           NODE
 
-      - uses: ./.github/actions/setup-webpresso-toolchain
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:
           cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
 
