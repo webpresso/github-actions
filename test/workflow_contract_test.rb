@@ -19,7 +19,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
     assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "preview", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
+    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     assert_step_uses(WORKFLOW_PREVIEW, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
     assert_step_uses(WORKFLOW_PREVIEW, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209")
     refute_includes File.read(WORKFLOW_PREVIEW), "__DIRECT_SECRET__"
@@ -33,7 +33,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
     assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "production", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562")
+    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     assert_step_uses(WORKFLOW_PRODUCTION, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
     assert_step_uses(WORKFLOW_PRODUCTION, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209")
     refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"

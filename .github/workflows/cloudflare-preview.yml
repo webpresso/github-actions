@@ -224,14 +224,14 @@ jobs:
 
       - name: Fetch Doppler-managed runtime secrets via token
         if: ${{ steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'true' }}
-        uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+        uses: DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         with:
           doppler-token: ${{ secrets.ci_secret_provider_token }}
           inject-env-vars: true
 
       - name: Fetch Doppler-managed runtime secrets via OIDC
         if: ${{ steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler' && steps.doppler_token.outputs.present == 'false' }}
-        uses: DopplerHQ/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+        uses: DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         with:
           auth-method: oidc
           doppler-identity-id: ${{ inputs.doppler_identity_id }}
