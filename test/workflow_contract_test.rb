@@ -21,7 +21,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "write", workflow.dig("jobs", "preview", "permissions", "id-token")
     assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     assert_step_uses(WORKFLOW_PREVIEW, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PREVIEW, "./.github/actions/setup-webpresso-toolchain")
+    assert_step_uses(WORKFLOW_PREVIEW, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d")
     refute_includes File.read(WORKFLOW_PREVIEW), "__DIRECT_SECRET__"
   end
 
@@ -35,7 +35,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "write", workflow.dig("jobs", "production", "permissions", "id-token")
     assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
     assert_step_uses(WORKFLOW_PRODUCTION, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
-    assert_step_uses(WORKFLOW_PRODUCTION, "./.github/actions/setup-webpresso-toolchain")
+    assert_step_uses(WORKFLOW_PRODUCTION, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d")
     refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"
   end
 
@@ -93,7 +93,7 @@ class WorkflowContractTest < Minitest::Test
   def test_release_workflow_uses_shared_toolchain_setup
     workflow = load_yaml(WORKFLOW_RELEASE)
     steps = workflow.dig("jobs", "release", "steps")
-    assert_includes extract_uses(steps), "./.github/actions/setup-webpresso-toolchain"
+    assert_includes extract_uses(steps), "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d"
     refute_includes File.read(WORKFLOW_RELEASE), "Resolve caller pnpm version"
   end
 
@@ -120,14 +120,14 @@ class WorkflowContractTest < Minitest::Test
     end
 
     ci = load_yaml(WORKFLOW_CI)
-    ci_toolchain_steps = all_steps(ci).select { |step| step["uses"] == "./.github/actions/setup-webpresso-toolchain" }
+    ci_toolchain_steps = all_steps(ci).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d" }
     assert_equal 4, ci_toolchain_steps.length
     ci_toolchain_steps.each do |step|
       assert_equal "vite-plus @webpresso/agent-kit@2.4.1", step.dig("with", "cli-global-packages")
     end
 
     security = load_yaml(WORKFLOW_SECURITY)
-    security_toolchain_steps = all_steps(security).select { |step| step["uses"] == "./.github/actions/setup-webpresso-toolchain" }
+    security_toolchain_steps = all_steps(security).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d" }
     assert_equal 1, security_toolchain_steps.length
     assert_equal "vite-plus @webpresso/agent-kit@2.4.1", security_toolchain_steps.first.dig("with", "cli-global-packages")
   end
@@ -158,7 +158,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "", inputs.dig("e2e_command", "default")
     assert_equal "", inputs.dig("architecture_command", "default")
     assert_equal "", inputs.dig("deploy_verify_command", "default")
-    assert_step_uses(WORKFLOW_CI, "./.github/actions/setup-webpresso-toolchain")
+    assert_step_uses(WORKFLOW_CI, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d")
     assert_equal ["quality", "e2e", "architecture", "deploy-verify"], workflow.dig("jobs", "ci", "needs")
     assert_equal "ci", workflow.dig("jobs", "ci", "name")
   end
@@ -170,7 +170,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "string", inputs.dig("security_command", "type")
     assert_step_uses(WORKFLOW_SECURITY, "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7")
     assert_step_uses(WORKFLOW_SECURITY, "google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2")
-    assert_step_uses(WORKFLOW_SECURITY, "./.github/actions/setup-webpresso-toolchain")
+    assert_step_uses(WORKFLOW_SECURITY, "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d")
   end
 
   private
