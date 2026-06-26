@@ -123,13 +123,13 @@ class WorkflowContractTest < Minitest::Test
     ci_toolchain_steps = all_steps(ci).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209" }
     assert_equal 4, ci_toolchain_steps.length
     ci_toolchain_steps.each do |step|
-      assert_equal "vite-plus @webpresso/agent-kit", step.dig("with", "cli-global-packages")
+      assert_equal "vite-plus @webpresso/agent-kit@2.4.1", step.dig("with", "cli-global-packages")
     end
 
     security = load_yaml(WORKFLOW_SECURITY)
     security_toolchain_steps = all_steps(security).select { |step| step["uses"] == "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209" }
     assert_equal 1, security_toolchain_steps.length
-    assert_equal "vite-plus @webpresso/agent-kit", security_toolchain_steps.first.dig("with", "cli-global-packages")
+    assert_equal "vite-plus @webpresso/agent-kit@2.4.1", security_toolchain_steps.first.dig("with", "cli-global-packages")
   end
 
   def test_all_workflow_and_action_uses_are_full_sha_pins
@@ -147,6 +147,7 @@ class WorkflowContractTest < Minitest::Test
     assert_includes readme, "repo-owned secret profiles"
     assert_includes readme, "ci_secret_provider_token"
     assert_includes readme, "full commit SHA"
+    assert_includes readme, "explicit package specs such as `@webpresso/agent-kit@2.4.1` pass through unchanged"
   end
 
   def test_shared_ci_workflow_uses_shared_toolchain_and_aggregate_gate

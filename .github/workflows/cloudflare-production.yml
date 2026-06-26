@@ -101,7 +101,7 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@3e86d0ab035d3c3e7e9a6f50896a3204bd6f6209
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit"
+          cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
 
       - name: Read committed secret-manager metadata
         id: secret_config
