@@ -18,7 +18,8 @@ inputs:
   cli-global-packages:
     description: >
       Space-separated dependency names to install globally at the caller's
-      pinned version (read from the caller package.json). Entries resolving to
+      pinned version (read from the caller package.json). Explicit package
+      specs like name@1.2.3 pass through unchanged. Entries resolving to
       catalog:/workspace:/link: are skipped. Empty disables the step.
     required: false
     default: ""
@@ -84,6 +85,12 @@ runs:
         const requested = (process.env.CLI_GLOBAL_PACKAGES ?? "").split(/\s+/u).filter(Boolean);
         const specs = [];
         for (const name of requested) {
+          const hasExplicitVersion =
+            /^[^@/\s][^@\s]*@.+$/u.test(name) || /^@[^/\s]+\/[^@\s]+@.+$/u.test(name);
+          if (hasExplicitVersion) {
+            specs.push(name);
+            continue;
+          }
           const range = ranges[name];
           if (typeof range !== "string" || range === "") continue;
           if (range === "catalog:" || range.startsWith("workspace:") || range.startsWith("link:")) continue;
