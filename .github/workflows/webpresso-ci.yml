@@ -26,6 +26,11 @@ on:
         required: false
         default: ""
         type: string
+      agent_kit_version:
+        description: "Exact published @webpresso/agent-kit version installed globally as wp"
+        required: false
+        default: "3.1.10"
+        type: string
       runner:
         description: "Runner label"
         required: false
@@ -49,7 +54,11 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
+          cli-global-packages: "vite-plus"
+
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71
+        with:
+          version: ${{ inputs.agent_kit_version }}
 
       - name: Install caller dependencies
         shell: bash
@@ -80,7 +89,10 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
+          cli-global-packages: "vite-plus"
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71
+        with:
+          version: ${{ inputs.agent_kit_version }}
       - name: Install caller dependencies
         shell: bash
         env:
@@ -109,7 +121,10 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
+          cli-global-packages: "vite-plus"
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71
+        with:
+          version: ${{ inputs.agent_kit_version }}
       - name: Install caller dependencies
         shell: bash
         env:
@@ -138,7 +153,10 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:
-          cli-global-packages: "vite-plus @webpresso/agent-kit@2.4.1"
+          cli-global-packages: "vite-plus"
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71
+        with:
+          version: ${{ inputs.agent_kit_version }}
       - name: Install caller dependencies
         shell: bash
         env:

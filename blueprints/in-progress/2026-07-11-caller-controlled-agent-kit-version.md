@@ -31,12 +31,12 @@ agent-kit installation block into every job or workflow.
 
 ## Tasks
 
-- [ ] Replace every inline agent-kit global package spec with the pinned
+- [x] Replace every inline agent-kit global package spec with the pinned
   `setup-wp` action and the reusable workflow input.
-- [ ] Add discovery-based workflow contract coverage for the version input,
+- [x] Add discovery-based workflow contract coverage for the version input,
   immutable action pin, and absence of inline agent-kit specs.
-- [ ] Update the README with the caller migration contract.
-- [ ] Run the repository contract suite and syntax/static validation available
+- [x] Update the README with the caller migration contract.
+- [x] Run the repository contract suite and syntax/static validation available
   in this repository.
 
 ## Acceptance criteria
@@ -56,5 +56,6 @@ agent-kit installation block into every job or workflow.
 
 ```bash
 ruby test/workflow_contract_test.rb
+actionlint -no-color .github/workflows/*.yml
 git diff --check
 ```
