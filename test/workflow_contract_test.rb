@@ -10,7 +10,7 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
   SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d"
-  SETUP_WP_USES = "webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71"
+  SETUP_WP_USES = "webpresso/agent-kit/.github/actions/setup-wp@ada31ce3f1b869653538b3f99b8e0729fbaa116b"
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)
@@ -134,7 +134,7 @@ class WorkflowContractTest < Minitest::Test
     assert_equal "vite-plus", security_toolchain_steps.first.dig("with", "cli-global-packages")
   end
 
-  def test_every_reusable_toolchain_workflow_has_caller_controlled_agent_kit_setup
+  def test_every_reusable_toolchain_workflow_uses_owner_versioned_agent_kit_setup
     workflow_paths = Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort
     toolchain_workflow_paths = workflow_paths.select do |path|
       all_uses(load_yaml(path)).include?(SETUP_TOOLCHAIN_USES)
@@ -145,18 +145,16 @@ class WorkflowContractTest < Minitest::Test
     toolchain_workflow_paths.each do |path|
       workflow = load_yaml(path)
       inputs = workflow_call_inputs(workflow)
-      input = inputs.fetch("agent_kit_version")
-      assert_equal "string", input.fetch("type"), path
-      assert_equal false, input.fetch("required"), path
-      assert_equal "3.1.10", input.fetch("default"), path
+      refute inputs.key?("agent_kit_version"), path
 
       setup_wp_steps = all_steps(workflow).select { |step| step["uses"] == SETUP_WP_USES }
       refute_empty setup_wp_steps, path
       setup_wp_steps.each do |step|
-        assert_equal "${{ inputs.agent_kit_version }}", step.dig("with", "version"), path
+        refute step.fetch("with", {}).key?("version"), path
       end
 
       refute_match(%r{@webpresso/agent-kit@}, File.read(path), path)
+      refute_includes File.read(path), "agent_kit_version", path
     end
   end
 
@@ -175,8 +173,8 @@ class WorkflowContractTest < Minitest::Test
     assert_includes readme, "repo-owned secret profiles"
     assert_includes readme, "ci_secret_provider_token"
     assert_includes readme, "full commit SHA"
-    assert_includes readme, "`agent_kit_version`"
-    assert_includes readme, "exact published version"
+    assert_includes readme, "self-resolves its exact published version"
+    assert_includes readme, "must not add `@webpresso/agent-kit`"
   end
 
   def test_shared_ci_workflow_uses_shared_toolchain_and_aggregate_gate

@@ -19,10 +19,9 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 - entries resolving to `catalog:`/`workspace:`/`link:` are skipped. This replaces per-workflow inline install blocks so the bootstrap lives in one place.
 
 Agent-kit contract:
-- every reusable workflow accepts `agent_kit_version`, defaulting to `3.1.10`
-- callers may override it with an exact published version; ranges and dist-tags are rejected by the immutable `setup-wp` action
+- every reusable workflow invokes one immutable `setup-wp` action commit, which self-resolves its exact published version from the owning agent-kit release
 - `wp` is installed globally after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- a shared-workflow revision updates the default for all consumers that omit the input; repositories only need an explicit input when intentionally holding a different version
+- consumers update only their reusable-workflow commit SHA; agent-kit version changes remain owned by this repository's immutable action reference
 
 Security contract:
 - reusable deployment workflows use repo-owned secret profiles plus provider-specific bootstrap

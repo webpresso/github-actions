@@ -17,11 +17,6 @@ on:
         required: false
         default: pnpm run release:publish
         type: string
-      agent_kit_version:
-        description: "Exact published @webpresso/agent-kit version installed globally as wp"
-        required: false
-        default: "3.1.10"
-        type: string
       runner:
         description: "Runner label"
         required: false
@@ -70,9 +65,7 @@ jobs:
           package-manager-cache: "false"
           cli-global-packages: "vite-plus"
 
-      - uses: webpresso/agent-kit/.github/actions/setup-wp@b112795412048280c49b0bd8f8cc94d2f9428d71
-        with:
-          version: ${{ inputs.agent_kit_version }}
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@ada31ce3f1b869653538b3f99b8e0729fbaa116b
 
       - name: Install caller dependencies
         shell: bash
