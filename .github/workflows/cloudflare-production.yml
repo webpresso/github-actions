@@ -103,7 +103,7 @@ jobs:
         with:
           cli-global-packages: "vite-plus"
 
-      - uses: webpresso/agent-kit/.github/actions/setup-wp@ada31ce3f1b869653538b3f99b8e0729fbaa116b
+      - uses: webpresso/agent-kit/.github/actions/setup-wp@666c86f139765d0a59f91b55e0df66f2d674cc57
 
       - name: Read committed secret-manager metadata
         id: secret_config
