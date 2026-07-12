@@ -5,8 +5,8 @@ owner: webpresso
 status: in-progress
 complexity: M
 created: "2026-06-19"
-last_updated: "2026-06-19"
-progress: "80% (capability-aware reusable deploy bootstrap, shared toolchain setup action, SHA-pinned provider actions, and fixture-style contract tests landed)"
+last_updated: "2026-07-12"
+progress: "90% (sink-scoped mutation boundary, environment binding, OIDC token exchange, failure-preserving rollback, shared setup, and contract tests implemented)"
 depends_on: []
 cross_repo_depends_on:
   - /Users/ozby/repos/_worktrees/agent-kit-dedupe/blueprints/in-progress/2026-06-19-agent-kit-wp-shared-e2e-secrets-act-supervisor.md
@@ -30,6 +30,9 @@ tags:
 4. Remove broad job-wide secret exports. ✅
 5. SHA-pin every third-party action in secret-bearing jobs. ✅
 6. Add fixture-style workflow validation where this repo supports it. ✅
+7. Route provider-managed mutations through caller-owned secret sinks. ✅
+8. Bind called jobs to caller-selected GitHub environments. ✅
+9. Preserve smoke failures while optionally rolling back a known release. ✅
 
 ## Verification
 
@@ -50,23 +53,27 @@ tags:
 - Added zero-dependency contract test:
   - `test/workflow_contract_test.rb`
   covering:
-  - capability-aware reusable workflow inputs
+  - required profile, sink, and GitHub environment inputs
   - `id-token: write`
   - full SHA pinning for shared setup/provider actions
+  - mutation-only provider authentication
+  - failure-preserving rollback and release ID handoff
   - shared setup action reuse
   - README security contract wording
-- Replaced broad `DOPPLER_TOKEN` / `INFISICAL_TOKEN` bootstrap exports with a
-  capability-aware contract: Doppler may use `ci_secret_provider_token` or
-  `doppler_identity_id`; Infisical stays OIDC-only via
-  `infisical_identity_id`.
-- Added explicit non-secret OIDC identity inputs:
-  - `doppler_identity_id`
-  - `infisical_identity_id`
-- Doppler secrets now fetch through `DopplerHQ/secrets-fetch-action` using
-  either the `ci_secret_provider_token` fallback or `auth-method: oidc`
-  depending on account capability.
-- Infisical secrets now fetch through `Infisical/secrets-action` with
-  `method: oidc`.
-- Narrowed optional direct runtime secrets from job-wide `GITHUB_ENV` export to
-  step-local env on caller verify/deploy/destroy/smoke blocks only.
+- Added required `secret_sink` and `github_environment` inputs beside the
+  required repo-owned `secret_profile`.
+- Removed direct runtime-secret inputs and all profile-wide secret-fetch
+  actions. Install, verify, and smoke remain provider-runtime-secretless.
+- Doppler static bootstrap tokens are mapped only onto mutation steps. Doppler
+  OIDC exchanges the GitHub token for a masked, short-lived provider token;
+  profile resolution then stays behind `wp secrets run`. The primary and
+  rollback exchanges reuse one syntax-checked helper per workflow, and contract
+  coverage locks the preview and production helpers to identical source.
+- Infisical now fails closed until a short-lived provider credential can be
+  passed to `wp secrets run` without exporting the profile job-wide.
+- Deploy, destroy, and rollback execute only through the caller-selected sink,
+  which must allow the `run` operation in committed metadata.
+- Added optional failure-preserving rollback. A failed smoke step can trigger a
+  secret-gated rollback using the deploy step's explicit `release_id` output,
+  after which the workflow still exits non-zero.
 - Reusable workflows still parse as valid YAML after the hardening pass.

@@ -1,4 +1,6 @@
 require "minitest/autorun"
+require "open3"
+require "tmpdir"
 require "yaml"
 
 class WorkflowContractTest < Minitest::Test
@@ -14,81 +16,180 @@ class WorkflowContractTest < Minitest::Test
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)
-    refute_includes File.read(WORKFLOW_PREVIEW), "skip_when_ci_secret_missing"
-    refute_includes File.read(WORKFLOW_PREVIEW), "secret_env_profile"
-    assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
+    inputs = workflow_call_inputs(workflow)
+    assert_equal true, inputs.dig("secret_profile", "required")
+    assert_equal true, inputs.dig("secret_sink", "required")
+    assert_equal true, inputs.dig("github_environment", "required")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
+    assert_equal "string", inputs.dig("doppler_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "preview", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
-    assert_step_uses(WORKFLOW_PREVIEW, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
+    assert_equal "${{ inputs.github_environment }}", workflow.dig("jobs", "preview", "environment")
+    assert_step_uses(WORKFLOW_PREVIEW, "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73")
     assert_step_uses(WORKFLOW_PREVIEW, SETUP_TOOLCHAIN_USES)
-    refute_includes File.read(WORKFLOW_PREVIEW), "__DIRECT_SECRET__"
   end
 
   def test_production_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PRODUCTION)
-    refute_includes File.read(WORKFLOW_PRODUCTION), "secret_env_profile"
-    assert_equal "string", workflow_call_inputs(workflow).dig("secret_profile", "type")
+    inputs = workflow_call_inputs(workflow)
+    assert_equal true, inputs.dig("secret_profile", "required")
+    assert_equal true, inputs.dig("secret_sink", "required")
+    assert_equal true, inputs.dig("github_environment", "required")
     assert_equal false, workflow_call_secrets(workflow).dig("ci_secret_provider_token", "required")
-    assert_equal "string", workflow_call_inputs(workflow).dig("doppler_identity_id", "type")
-    assert_equal "string", workflow_call_inputs(workflow).dig("infisical_identity_id", "type")
+    assert_equal "string", inputs.dig("doppler_identity_id", "type")
     assert_equal "write", workflow.dig("jobs", "production", "permissions", "id-token")
-    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534")
-    assert_step_uses(WORKFLOW_PRODUCTION, "Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995")
+    assert_equal "${{ inputs.github_environment }}", workflow.dig("jobs", "production", "environment")
+    assert_step_uses(WORKFLOW_PRODUCTION, "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73")
     assert_step_uses(WORKFLOW_PRODUCTION, SETUP_TOOLCHAIN_USES)
-    refute_includes File.read(WORKFLOW_PRODUCTION), "__DIRECT_SECRET__"
   end
 
-
-
-  def test_deploy_workflows_map_direct_secret_inputs_to_job_env
+  def test_deploy_workflows_never_export_profiles_or_runtime_secrets_job_wide
     { WORKFLOW_PREVIEW => "preview", WORKFLOW_PRODUCTION => "production" }.each do |path, job_name|
       workflow = load_yaml(path)
-      env = workflow.dig("jobs", job_name, "env")
-      {
-        "CLOUDFLARE_ACCOUNT_ID" => "${{ secrets.cloudflare_account_id }}",
-        "CLOUDFLARE_API_TOKEN" => "${{ secrets.cloudflare_api_token }}",
-        "CLOUDFLARE_ZONE_ID" => "${{ secrets.cloudflare_zone_id }}",
-        "NEON_API_KEY" => "${{ secrets.neon_api_key }}",
-        "NEON_PROJECT_ID" => "${{ secrets.neon_project_id }}",
-        "NEON_PARENT_BRANCH_ID" => "${{ secrets.neon_parent_branch_id }}",
-        "PULUMI_ACCESS_TOKEN" => "${{ secrets.pulumi_access_token }}",
-        "BETTER_AUTH_SECRET" => "${{ secrets.better_auth_secret }}",
-        "JWT_SECRET" => "${{ secrets.jwt_secret }}",
-        "LANGFUSE_PUBLIC_KEY" => "${{ secrets.langfuse_public_key }}",
-        "LANGFUSE_SECRET_KEY" => "${{ secrets.langfuse_secret_key }}",
-      }.each do |name, expression|
-        assert_equal expression, env.fetch(name), "#{path} should expose direct secret #{name}"
+      job_env = workflow.dig("jobs", job_name, "env") || {}
+      refute job_env.keys.any? { |name| name.match?(/(?:TOKEN|PASSWORD|_KEY)\z/u) }, path
+
+      contents = File.read(path)
+      refute_includes contents, "inject-env-vars"
+      refute_includes contents, "DopplerHQ/secrets-fetch-action@"
+      refute_includes contents, "Infisical/secrets-action@"
+      refute_includes contents, "CLOUDFLARE_API_TOKEN"
+      refute_includes contents, "PULUMI_ACCESS_TOKEN"
+    end
+  end
+
+  def test_provider_auth_is_scoped_to_secret_gated_mutation_steps
+    { WORKFLOW_PREVIEW => %w[deploy destroy rollback], WORKFLOW_PRODUCTION => %w[deploy rollback] }.each do |path, allowed_ids|
+      workflow = load_yaml(path)
+      steps = all_steps(workflow)
+      token_steps = steps.select { |step| step.fetch("env", {}).key?("DOPPLER_TOKEN") }
+      refute_empty token_steps, path
+      assert_empty token_steps.map { |step| step["id"] }.compact - allowed_ids, path
+      provider_secret_steps = steps.select do |step|
+        step.to_s.include?("secrets.ci_secret_provider_token")
+      end
+      assert_equal allowed_ids, provider_secret_steps.map { |step| step["id"] }, path
+
+      %w[install verify smoke].each do |id|
+        step = steps.find { |candidate| candidate["id"] == id }
+        next unless step
+        expected_env = id == "install" ? %w[GITHUB_TOKEN NODE_AUTH_TOKEN INSTALL_COMMAND] : ["#{id.upcase}_COMMAND"]
+        assert_equal expected_env, step.fetch("env", {}).keys, "#{path} #{id} must remain provider-runtime-secretless"
       end
     end
   end
 
-
-  def test_deploy_workflows_skip_provider_fetch_when_direct_secrets_are_supplied
+  def test_embedded_node_programs_parse
     [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
-      contents = File.read(path)
-      assert_includes contents, "id: direct_secrets"
-      assert_includes contents, "DIRECT_SECRETS_PRESENT: ${{ steps.direct_secrets.outputs.present }}"
-      assert_includes contents, "steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'doppler'"
-      assert_includes contents, "steps.direct_secrets.outputs.present != 'true' && steps.secret_config.outputs.manager == 'infisical'"
-      assert_includes contents, 'if [[ "${DIRECT_SECRETS_PRESENT}" != "true" && "${TOKEN_PRESENT}" != "true" && -z "${DOPPLER_IDENTITY_ID}" ]]; then'
+      programs = File.read(path).scan(/(?:node[^\n]*|cat >[^\n]*) <<'NODE'[^\n]*\n(.*?)^\s*NODE$/m).flatten
+      refute_empty programs, path
+      programs.each do |program|
+        _stdout, stderr, status = Open3.capture3("node", "--check", stdin_data: program)
+        assert status.success?, "#{path} contains invalid embedded JavaScript:\n#{stderr}"
+      end
     end
   end
 
-  def test_deploy_workflows_accept_legacy_secret_metadata_without_profiles
+  def test_doppler_oidc_helper_is_shared_and_exchanges_only_provider_auth
+    preview_helper = extract_doppler_oidc_helper(WORKFLOW_PREVIEW)
+    production_helper = extract_doppler_oidc_helper(WORKFLOW_PRODUCTION)
+    assert_equal preview_helper, production_helper
+
+    Dir.mktmpdir("doppler-oidc-contract") do |directory|
+      helper_path = File.join(directory, "exchange.cjs")
+      preload_path = File.join(directory, "mock-fetch.cjs")
+      output_path = File.join(directory, "github-output")
+      File.write(helper_path, preview_helper)
+      File.write(
+        preload_path,
+        <<~'JAVASCRIPT',
+          global.fetch = async (url, options = {}) => {
+            if (url === "https://github.example.test/oidc") {
+              if (options.headers?.Authorization !== "Bearer request-token") {
+                throw new Error("missing GitHub request authorization");
+              }
+              return { ok: true, status: 200, json: async () => ({ value: "github-oidc-token" }) };
+            }
+            if (url === "https://api.doppler.com/v3/auth/oidc") {
+              const body = JSON.parse(options.body ?? "{}");
+              if (body.identity !== "identity-id" || body.token !== "github-oidc-token") {
+                throw new Error("invalid Doppler exchange payload");
+              }
+              return { ok: true, status: 200, json: async () => ({ token: "dp.said.short-lived" }) };
+            }
+            throw new Error(`unexpected URL: ${url}`);
+          };
+        JAVASCRIPT
+      )
+      stdout, stderr, status = Open3.capture3(
+        {
+          "ACTIONS_ID_TOKEN_REQUEST_URL" => "https://github.example.test/oidc",
+          "ACTIONS_ID_TOKEN_REQUEST_TOKEN" => "request-token",
+          "DOPPLER_IDENTITY_ID" => "identity-id",
+          "GITHUB_OUTPUT" => output_path,
+        },
+        "node",
+        "--require",
+        preload_path,
+        helper_path,
+      )
+      assert status.success?, stderr
+      assert_includes stdout, "::add-mask::github-oidc-token"
+      assert_includes stdout, "::add-mask::dp.said.short-lived"
+      assert_equal "token=dp.said.short-lived\n", File.read(output_path)
+    end
+  end
+
+  def test_deploy_workflows_validate_sink_and_fail_closed_for_infisical
     [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
       contents = File.read(path)
-      assert_includes contents, 'if (payload?.schemaVersion === 1) {'
-      assert_includes contents, 'const defaultProvider = payload?.providers?.default;'
-      assert_includes contents, 'manager = defaultProvider?.type;'
-      assert_includes contents, 'projectId = defaultProvider?.project;'
-      assert_includes contents, 'manager = payload?.manager;'
-      assert_includes contents, 'projectId = payload?.projectId;'
-      assert_includes contents, 'const hasProfiles = typeof profiles === "object" && profiles !== null && !Array.isArray(profiles);'
-      assert_includes contents, 'const environment = hasProfiles ? profile?.environment : secretProfile;'
+      assert_includes contents, 'Missing workflow_call input secret_sink.'
+      assert_includes contents, 'Unknown secret sink "${secretSink}"'
+      assert_includes contents, 'does not allow the run operation'
       assert_includes contents, 'Unknown secret profile "${secretProfile}"'
+      assert_includes contents, 'Infisical is not supported by the sink-scoped reusable deploy harness'
+    end
+  end
+
+  def test_doppler_oidc_exchanges_for_a_masked_short_lived_token_only
+    [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
+      contents = File.read(path)
+      assert_includes contents, "id: doppler_oidc"
+      assert_includes contents, "ACTIONS_ID_TOKEN_REQUEST_URL"
+      assert_includes contents, "https://api.doppler.com/v3/auth/oidc"
+      assert_equal 1, contents.scan("https://api.doppler.com/v3/auth/oidc").length
+      assert_includes contents, "::add-mask::"
+      assert_includes contents, 'token=${token}'
+      refute_includes contents, "inject-env-vars"
+    end
+  end
+
+  def test_mutation_commands_run_only_through_caller_selected_secret_sink
+    [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
+      contents = File.read(path)
+      assert_includes contents, 'wp secrets run --sink "${SECRET_SINK}" --profile "${SECRET_PROFILE}" -- bash -leo pipefail -c'
+      refute_match(/^\s+bash -leo pipefail -c "\$(?:DEPLOY|DESTROY|ROLLBACK)_COMMAND"$/u, contents)
+    end
+  end
+
+  def test_smoke_failure_runs_optional_rollback_and_still_fails
+    [WORKFLOW_PREVIEW, WORKFLOW_PRODUCTION].each do |path|
+      workflow = load_yaml(path)
+      inputs = workflow_call_inputs(workflow)
+      assert_equal "", inputs.dig("rollback_command", "default")
+
+      steps = all_steps(workflow)
+      deploy = steps.find { |step| step["id"] == "deploy" }
+      smoke = steps.find { |step| step["id"] == "smoke" }
+      rollback = steps.find { |step| step["id"] == "rollback" }
+      failure_gate = steps.find { |step| step["id"] == "smoke_failure" }
+
+      refute_nil deploy, path
+      assert_equal true, smoke["continue-on-error"], path
+      assert_includes rollback.fetch("if"), "steps.deploy.outcome == 'success'"
+      assert_includes rollback.fetch("if"), "steps.smoke.outcome == 'failure'"
+      assert_equal "${{ steps.deploy.outputs.release_id }}", rollback.dig("env", "RELEASE_ID")
+      assert_includes failure_gate.fetch("if"), "steps.smoke.outcome == 'failure'"
+      assert_includes failure_gate.fetch("run"), "exit 1"
     end
   end
 
@@ -168,10 +269,13 @@ class WorkflowContractTest < Minitest::Test
     end
   end
 
-  def test_readme_describes_oidc_only_contract
+  def test_readme_describes_sink_scoped_secret_contract
     readme = File.read(File.join(REPO_ROOT, "README.md"))
     assert_includes readme, "repo-owned secret profiles"
     assert_includes readme, "ci_secret_provider_token"
+    assert_includes readme, "secret_sink"
+    assert_includes readme, "github_environment"
+    assert_includes readme, "rollback_command"
     assert_includes readme, "full commit SHA"
     assert_includes readme, "self-resolves its exact published version"
     assert_includes readme, "must not add `@webpresso/agent-kit`"
@@ -237,6 +341,12 @@ class WorkflowContractTest < Minitest::Test
         Array(job["steps"])
       end
     assert_includes extract_uses(steps), expected_uses
+  end
+
+  def extract_doppler_oidc_helper(path)
+    match = File.read(path).match(/cat > "\$\{DOPPLER_OIDC_HELPER\}" <<'NODE'\n(.*?)^\s*NODE$/m)
+    refute_nil match, path
+    match[1]
   end
 
   def workflow_call_inputs(workflow)
