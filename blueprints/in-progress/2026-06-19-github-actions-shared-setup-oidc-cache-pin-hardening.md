@@ -6,7 +6,7 @@ status: in-progress
 complexity: M
 created: "2026-06-19"
 last_updated: "2026-07-12"
-progress: "90% (sink-scoped mutation boundary, environment binding, OIDC token exchange, failure-preserving rollback, shared setup, and contract tests implemented)"
+progress: "95% (sink-scoped mutation boundary, trusted checkout override, environment binding, OIDC token exchange, failure-preserving rollback, shared setup, and contract tests implemented)"
 depends_on: []
 cross_repo_depends_on:
   - /Users/ozby/repos/_worktrees/agent-kit-dedupe/blueprints/in-progress/2026-06-19-agent-kit-wp-shared-e2e-secrets-act-supervisor.md
@@ -33,6 +33,7 @@ tags:
 7. Route provider-managed mutations through caller-owned secret sinks. ✅
 8. Bind called jobs to caller-selected GitHub environments. ✅
 9. Preserve smoke failures while optionally rolling back a known release. ✅
+10. Allow cleanup/recovery callers to pin a trusted base commit instead of executing pull-request code with deploy credentials. ✅
 
 ## Verification
 
@@ -76,4 +77,7 @@ tags:
 - Added optional failure-preserving rollback. A failed smoke step can trigger a
   secret-gated rollback using the deploy step's explicit `release_id` output,
   after which the workflow still exits non-zero.
+- Added an optional `checkout_ref` trust boundary. Cleanup/recovery callers can
+  pin the checked-out repository to an explicitly trusted base commit; other
+  callers default to the triggering commit.
 - Reusable workflows still parse as valid YAML after the hardening pass.

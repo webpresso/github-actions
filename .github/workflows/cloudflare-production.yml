@@ -37,6 +37,11 @@ on:
         description: "Caller-selected GitHub environment for approvals and environment-scoped secrets"
         required: true
         type: string
+      checkout_ref:
+        description: "Optional trusted commit/ref to check out; defaults to the triggering commit"
+        required: false
+        default: ""
+        type: string
       doppler_identity_id:
         description: "Optional Doppler OIDC service account identity ID; when empty, ci_secret_provider_token is required"
         required: false
@@ -74,6 +79,8 @@ jobs:
       SECRET_SINK: ${{ inputs.secret_sink }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d
         with:

@@ -42,6 +42,21 @@ class WorkflowContractTest < Minitest::Test
     assert_step_uses(WORKFLOW_PRODUCTION, SETUP_TOOLCHAIN_USES)
   end
 
+  def test_deploy_workflows_allow_callers_to_pin_a_trusted_checkout
+    { WORKFLOW_PREVIEW => "preview", WORKFLOW_PRODUCTION => "production" }.each do |path, job_name|
+      workflow = load_yaml(path)
+      inputs = workflow_call_inputs(workflow)
+      assert_equal "", inputs.dig("checkout_ref", "default"), path
+
+      checkout = all_steps(workflow).find do |step|
+        step["uses"] == "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd"
+      end
+      refute_nil checkout, path
+      assert_equal "${{ inputs.checkout_ref || github.sha }}", checkout.dig("with", "ref"), path
+      assert_equal "${{ inputs.github_environment }}", workflow.dig("jobs", job_name, "environment")
+    end
+  end
+
   def test_deploy_workflows_never_export_profiles_or_runtime_secrets_job_wide
     { WORKFLOW_PREVIEW => "preview", WORKFLOW_PRODUCTION => "production" }.each do |path, job_name|
       workflow = load_yaml(path)
