@@ -1,7 +1,7 @@
 name: Set up Webpresso workflow toolchain
 description: >
   Resolve the caller's pnpm version, install pnpm, configure Node.js and
-  Corepack, and optionally install Bun.
+  Corepack, install the caller-pinned Vite+ CLI, and optionally install Bun.
 inputs:
   node-version:
     description: "Node.js version to install"
@@ -15,14 +15,6 @@ inputs:
     description: "Whether to install Bun"
     required: false
     default: "true"
-  cli-global-packages:
-    description: >
-      Space-separated dependency names to install globally at the caller's
-      pinned version (read from the caller package.json). Explicit package
-      specs like name@1.2.3 pass through unchanged. Entries resolving to
-      catalog:/workspace:/link: are skipped. Empty disables the step.
-    required: false
-    default: ""
 runs:
   using: composite
   steps:
@@ -66,42 +58,11 @@ runs:
         corepack enable
         corepack prepare "pnpm@${{ steps.pnpm.outputs.version }}" --activate
 
+    - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+      with:
+        run-install: false
+
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       if: ${{ inputs.install-bun == 'true' }}
       with:
         bun-version: latest
-
-    - name: Install caller-pinned CLI globals
-      if: ${{ inputs.cli-global-packages != '' }}
-      shell: bash
-      env:
-        CLI_GLOBAL_PACKAGES: ${{ inputs.cli-global-packages }}
-      run: |
-        set -euo pipefail
-        specs="$(node <<'NODE'
-        const fs = require("node:fs");
-        const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
-        const ranges = { ...(manifest.dependencies ?? {}), ...(manifest.devDependencies ?? {}) };
-        const requested = (process.env.CLI_GLOBAL_PACKAGES ?? "").split(/\s+/u).filter(Boolean);
-        const specs = [];
-        for (const name of requested) {
-          const hasExplicitVersion =
-            /^[^@/\s][^@\s]*@.+$/u.test(name) || /^@[^/\s]+\/[^@\s]+@.+$/u.test(name);
-          if (hasExplicitVersion) {
-            specs.push(name);
-            continue;
-          }
-          const range = ranges[name];
-          if (typeof range !== "string" || range === "") continue;
-          if (range === "catalog:" || range.startsWith("workspace:") || range.startsWith("link:")) continue;
-          specs.push(`${name}@${range}`);
-        }
-        process.stdout.write(specs.join(" "));
-        NODE
-        )"
-        if [[ -n "${specs}" ]]; then
-          echo "Installing caller-pinned CLI globals: ${specs}"
-          npm install -g ${specs}
-        else
-          echo "No concrete caller CLI versions to install globally; skipping."
-        fi

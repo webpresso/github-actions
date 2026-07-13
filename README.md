@@ -13,10 +13,9 @@ Current workflows:
 Consumers should pin reusable workflow references by full commit SHA.
 
 Shared toolchain action (`setup-webpresso-toolchain`):
-- resolves the caller's pnpm version from `package.json` and configures pnpm, Node.js, Corepack, and (optionally) Bun
-- `cli-global-packages` (optional, space-separated) installs the named CLIs globally at the caller's pinned version, read from `package.json`
-- explicit package specs pass through unchanged when another global CLI needs an owner-controlled version
-- entries resolving to `catalog:`/`workspace:`/`link:` are skipped. This replaces per-workflow inline install blocks so the bootstrap lives in one place.
+- resolves the caller's pnpm version from `package.json` and configures pnpm, Node.js, Corepack, Vite+, and (optionally) Bun
+- installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
+- configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
 Agent-kit contract:
 - every reusable workflow invokes one immutable `setup-wp` action commit, which self-resolves its exact published version from the owning agent-kit release

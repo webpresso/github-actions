@@ -5,8 +5,8 @@ owner: webpresso
 status: in-progress
 complexity: M
 created: "2026-06-19"
-last_updated: "2026-07-12"
-progress: "95% (sink-scoped mutation boundary, trusted checkout override, environment binding, OIDC token exchange, failure-preserving rollback, shared setup, and contract tests implemented)"
+last_updated: "2026-07-13"
+progress: "97% (shared setup now owns catalog-aware Vite+ bootstrap; immutable consumer repin and production proof remain)"
 depends_on: []
 cross_repo_depends_on:
   - /Users/ozby/repos/_worktrees/agent-kit-dedupe/blueprints/in-progress/2026-06-19-agent-kit-wp-shared-e2e-secrets-act-supervisor.md
@@ -34,6 +34,7 @@ tags:
 8. Bind called jobs to caller-selected GitHub environments. ✅
 9. Preserve smoke failures while optionally rolling back a known release. ✅
 10. Allow cleanup/recovery callers to pin a trusted base commit instead of executing pull-request code with deploy credentials. ✅
+11. Guarantee that the shared setup action provides `vp` before `setup-wp`, including callers that pin Vite+ through a workspace catalog. ◐
 
 ## Verification
 
@@ -47,7 +48,7 @@ tags:
 - Added shared local composite action:
   - `.github/actions/setup-webpresso-toolchain/action.yml`
   which centralizes pnpm version resolution, pnpm install, Node setup,
-  Corepack activation, and optional Bun setup.
+  Corepack activation, catalog-aware Vite+ setup, and optional Bun setup.
 - `cloudflare-preview.yml`, `cloudflare-production.yml`, and
   `changesets-release.yml` now reuse that shared setup action instead of
   inlining duplicated setup steps.
@@ -81,3 +82,11 @@ tags:
   pin the checked-out repository to an explicitly trusted base commit; other
   callers default to the triggering commit.
 - Reusable workflows still parse as valid YAML after the hardening pass.
+- Production run `29236597774` exposed a setup-owner invariant violation before
+  any provider authentication or deploy mutation: the generic global-package
+  resolver skipped `vite-plus` when the caller declared it through `catalog:`,
+  then `setup-wp` failed because `vp` was absent. The shared action now uses the
+  SHA-pinned official `voidzero-dev/setup-vp` action with `run-install: false`;
+  that action natively resolves package-manager catalogs and leaves dependency
+  installation to the existing workflow install step. Contract coverage rejects
+  the removed npm-global heuristic and requires the immutable Vite+ setup pin.
