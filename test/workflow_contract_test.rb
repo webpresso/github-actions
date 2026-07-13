@@ -11,7 +11,7 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_CI = File.join(REPO_ROOT, ".github", "workflows", "webpresso-ci.yml")
   WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
-  SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@0f82e2717c0e406ac25212f696fe3ba6fd9f851d"
+  SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
   SETUP_WP_USES = "webpresso/agent-kit/.github/actions/setup-wp@4e5bdcef14b5aa91c1ba2980732759834de8ad3d"
 
   def test_preview_workflow_bootstrap_contract_and_pins
@@ -243,24 +243,18 @@ class WorkflowContractTest < Minitest::Test
   end
 
 
-  def test_shared_ci_and_security_do_not_duplicate_cli_global_install_blocks
-    [WORKFLOW_CI, WORKFLOW_SECURITY].each do |path|
+  def test_reusable_workflows_do_not_request_removed_global_cli_input
+    workflow_paths.each do |path|
       contents = File.read(path)
-      refute_includes contents, "/tmp/webpresso-cli-globals", "#{path} should use setup-webpresso-toolchain cli-global-packages instead of temp-file bootstrap"
+      refute_includes contents, "/tmp/webpresso-cli-globals", path
       refute_match(/npm\s+install\s+-g\s+\$\(cat\s+[^)]*\)/, contents, "#{path} should not install globals from cat output inline")
-    end
 
-    ci = load_yaml(WORKFLOW_CI)
-    ci_toolchain_steps = all_steps(ci).select { |step| step["uses"] == SETUP_TOOLCHAIN_USES }
-    assert_equal 4, ci_toolchain_steps.length
-    ci_toolchain_steps.each do |step|
-      assert_equal "vite-plus", step.dig("with", "cli-global-packages")
+      toolchain_steps = all_steps(load_yaml(path)).select { |step| step["uses"] == SETUP_TOOLCHAIN_USES }
+      refute_empty toolchain_steps, path
+      toolchain_steps.each do |step|
+        refute step.fetch("with", {}).key?("cli-global-packages"), path
+      end
     end
-
-    security = load_yaml(WORKFLOW_SECURITY)
-    security_toolchain_steps = all_steps(security).select { |step| step["uses"] == SETUP_TOOLCHAIN_USES }
-    assert_equal 1, security_toolchain_steps.length
-    assert_equal "vite-plus", security_toolchain_steps.first.dig("with", "cli-global-packages")
   end
 
   def test_every_reusable_toolchain_workflow_uses_owner_versioned_agent_kit_setup
@@ -276,15 +270,29 @@ class WorkflowContractTest < Minitest::Test
       inputs = workflow_call_inputs(workflow)
       refute inputs.key?("agent_kit_version"), path
 
-      setup_wp_steps = all_steps(workflow).select { |step| step["uses"] == SETUP_WP_USES }
-      refute_empty setup_wp_steps, path
-      setup_wp_steps.each do |step|
-        refute step.fetch("with", {}).key?("version"), path
+      setup_wp_count = 0
+      workflow.fetch("jobs").each_value do |job|
+        steps = job.fetch("steps", [])
+        steps.each_index do |index|
+          step = steps[index]
+          next unless step["uses"] == SETUP_WP_USES
+
+          setup_wp_count += 1
+          toolchain_index = steps.index { |candidate| candidate["uses"] == SETUP_TOOLCHAIN_USES }
+          refute_nil toolchain_index, path
+          assert_operator toolchain_index, :<, index, path
+          refute step.fetch("with", {}).key?("version"), path
+        end
       end
+      assert_operator setup_wp_count, :>, 0, path
 
       refute_match(%r{@webpresso/agent-kit@}, File.read(path), path)
       refute_includes File.read(path), "agent_kit_version", path
     end
+  end
+
+  def workflow_paths
+    Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort
   end
 
   def test_all_workflow_and_action_uses_are_full_sha_pins
