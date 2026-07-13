@@ -6,7 +6,7 @@ status: in-progress
 complexity: M
 created: "2026-06-19"
 last_updated: "2026-07-13"
-progress: "97% (shared setup now owns catalog-aware Vite+ bootstrap; immutable consumer repin and production proof remain)"
+progress: "99% (catalog-aware Vite+ bootstrap and immutable shared-workflow repin complete; caller production proof remains)"
 depends_on: []
 cross_repo_depends_on:
   - /Users/ozby/repos/_worktrees/agent-kit-dedupe/blueprints/in-progress/2026-06-19-agent-kit-wp-shared-e2e-secrets-act-supervisor.md
@@ -34,7 +34,7 @@ tags:
 8. Bind called jobs to caller-selected GitHub environments. ✅
 9. Preserve smoke failures while optionally rolling back a known release. ✅
 10. Allow cleanup/recovery callers to pin a trusted base commit instead of executing pull-request code with deploy credentials. ✅
-11. Guarantee that the shared setup action provides `vp` before `setup-wp`, including callers that pin Vite+ through a workspace catalog. ◐
+11. Guarantee that the shared setup action provides `vp` before `setup-wp`, including callers that pin Vite+ through a workspace catalog. ✅
 
 ## Verification
 
@@ -90,3 +90,7 @@ tags:
   that action natively resolves package-manager catalogs and leaves dependency
   installation to the existing workflow install step. Contract coverage rejects
   the removed npm-global heuristic and requires the immutable Vite+ setup pin.
+- The owner repair merged as `d0de856fd4e786ab59875afbecf55b579d83c379`.
+  Every reusable workflow now pins that commit, no workflow passes the removed
+  `cli-global-packages` input, and contract coverage verifies that each
+  `setup-wp` invocation follows the owner toolchain setup in the same job.
