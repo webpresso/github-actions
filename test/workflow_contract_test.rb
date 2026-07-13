@@ -229,6 +229,19 @@ class WorkflowContractTest < Minitest::Test
     end
   end
 
+  def test_shared_toolchain_action_uses_catalog_aware_vite_plus_setup
+    action = load_yaml(ACTION_TOOLCHAIN)
+    steps = action.dig("runs", "steps")
+    setup_vp = steps.find do |step|
+      step["uses"] == "voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb"
+    end
+
+    refute_nil setup_vp
+    assert_equal false, setup_vp.dig("with", "run-install")
+    refute action.fetch("inputs").key?("cli-global-packages")
+    refute_includes File.read(ACTION_TOOLCHAIN), "npm install -g"
+  end
+
 
   def test_shared_ci_and_security_do_not_duplicate_cli_global_install_blocks
     [WORKFLOW_CI, WORKFLOW_SECURITY].each do |path|
