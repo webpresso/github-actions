@@ -307,6 +307,9 @@ class WorkflowContractTest < Minitest::Test
     assert_includes readme, "full commit SHA"
     assert_includes readme, "self-resolves its exact published version"
     assert_includes readme, "must not add `@webpresso/agent-kit`"
+    assert_includes readme, "workspace catalogs"
+    assert_includes readme, "`run-install: false`"
+    refute_includes readme, "cli-global-packages"
   end
 
   def test_shared_ci_workflow_uses_shared_toolchain_and_aggregate_gate

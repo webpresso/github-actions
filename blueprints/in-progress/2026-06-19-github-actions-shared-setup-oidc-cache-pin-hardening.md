@@ -48,7 +48,7 @@ tags:
 - Added shared local composite action:
   - `.github/actions/setup-webpresso-toolchain/action.yml`
   which centralizes pnpm version resolution, pnpm install, Node setup,
-  Corepack activation, and optional Bun setup.
+  Corepack activation, catalog-aware Vite+ setup, and optional Bun setup.
 - `cloudflare-preview.yml`, `cloudflare-production.yml`, and
   `changesets-release.yml` now reuse that shared setup action instead of
   inlining duplicated setup steps.
