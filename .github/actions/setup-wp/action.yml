@@ -1,0 +1,40 @@
+name: Setup global wp
+description: >
+  Install and verify a caller-pinned wp (@webpresso/agent-kit) version
+  globally. This action does not self-derive a version; the caller owns and
+  pins the exact @webpresso/agent-kit semver to install.
+
+inputs:
+  version:
+    description: >
+      Exact published @webpresso/agent-kit semver to install globally (no
+      ranges, no dist-tags).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install global wp
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if ! command -v vp >/dev/null 2>&1; then
+          echo "::error::setup-wp requires Vite+ on PATH; run voidzero-dev/setup-vp first."
+          exit 127
+        fi
+
+        if [[ ! "${WP_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::setup-wp 'version' input must be an exact published semver, not a range or dist-tag. Got: '${WP_VERSION}'"
+          exit 2
+        fi
+
+        # npm owns the process-global CLI location. In reusable workflows a
+        # project-local vp can legitimately shadow the global vp installed by
+        # setup-vp, and local vp deliberately rejects global package writes.
+        # Install here so this action remains correct in both direct and
+        # reusable workflow callers.
+        npm install -g --force "@webpresso/agent-kit@${WP_VERSION}"
+        wp --version
