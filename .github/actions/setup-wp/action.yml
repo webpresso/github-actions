@@ -37,4 +37,14 @@ runs:
         # Install here so this action remains correct in both direct and
         # reusable workflow callers.
         npm install -g --force "@webpresso/agent-kit@${WP_VERSION}"
-        wp --version
+
+        # Verify the globally-resolved wp is exactly the pinned version. Guards
+        # against npm resolving a different build (e.g. an unpublished pin, a
+        # cache/registry mismatch, or a shadowing global install) — fail loudly
+        # rather than run a surprise version.
+        installed="$(wp --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' | head -1)"
+        if [[ "${installed}" != "${WP_VERSION}" ]]; then
+          echo "::error::setup-wp installed wp '${installed:-<none>}' but the pinned version is '${WP_VERSION}'. The requested @webpresso/agent-kit version may be unpublished, or npm resolved a different build."
+          exit 3
+        fi
+        echo "setup-wp: installed and verified wp ${installed}"
