@@ -18,9 +18,10 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
 Agent-kit contract:
-- every reusable workflow invokes one immutable `setup-wp` action commit, which self-resolves its exact published version from the owning agent-kit release
+- every reusable workflow invokes one immutable `setup-wp` action commit, hosted in this public repo so callers outside the `webpresso` GitHub org can resolve it (the equivalent action in the private `webpresso/agent-kit` repo cannot be shared across organizations)
+- `setup-wp` takes a required `version` input — the caller supplies the exact published `@webpresso/agent-kit` semver to install; the action does not self-resolve a version
 - `wp` is installed globally after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- consumers update only their reusable-workflow commit SHA; agent-kit version changes remain owned by this repository's immutable action reference
+- consumers update their reusable-workflow commit SHA and, independently, the pinned `version` input when they want a newer agent-kit release
 
 Security contract:
 - reusable deployment workflows use repo-owned secret profiles and require a

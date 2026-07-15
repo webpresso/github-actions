@@ -12,7 +12,8 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
   SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
-  SETUP_WP_USES = "webpresso/agent-kit/.github/actions/setup-wp@4e5bdcef14b5aa91c1ba2980732759834de8ad3d"
+  SETUP_WP_USES = "webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88"
+  SETUP_WP_VERSION = "3.1.11"
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)
@@ -257,7 +258,7 @@ class WorkflowContractTest < Minitest::Test
     end
   end
 
-  def test_every_reusable_toolchain_workflow_uses_owner_versioned_agent_kit_setup
+  def test_every_reusable_toolchain_workflow_uses_caller_versioned_agent_kit_setup
     workflow_paths = Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort
     toolchain_workflow_paths = workflow_paths.select do |path|
       all_uses(load_yaml(path)).include?(SETUP_TOOLCHAIN_USES)
@@ -281,7 +282,7 @@ class WorkflowContractTest < Minitest::Test
           toolchain_index = steps.index { |candidate| candidate["uses"] == SETUP_TOOLCHAIN_USES }
           refute_nil toolchain_index, path
           assert_operator toolchain_index, :<, index, path
-          refute step.fetch("with", {}).key?("version"), path
+          assert_equal SETUP_WP_VERSION, step.fetch("with", {})["version"], path
         end
       end
       assert_operator setup_wp_count, :>, 0, path
@@ -313,7 +314,7 @@ class WorkflowContractTest < Minitest::Test
     assert_includes readme, "github_environment"
     assert_includes readme, "rollback_command"
     assert_includes readme, "full commit SHA"
-    assert_includes readme, "self-resolves its exact published version"
+    assert_includes readme, "does not self-resolve a version"
     assert_includes readme, "must not add `@webpresso/agent-kit`"
     assert_includes readme, "workspace catalogs"
     assert_includes readme, "`run-install: false`"
