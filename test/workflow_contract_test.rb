@@ -13,7 +13,7 @@ class WorkflowContractTest < Minitest::Test
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
   SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
   SETUP_WP_USES = "webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88"
-  SETUP_WP_VERSION = "3.1.11"
+  SETUP_WP_VERSION = "3.1.17"
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)

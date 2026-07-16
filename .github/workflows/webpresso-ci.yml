@@ -51,7 +51,7 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
         with:
-          version: "3.1.11"
+          version: "3.1.17"
 
       - name: Install caller dependencies
         shell: bash
@@ -83,7 +83,7 @@ jobs:
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
       - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
         with:
-          version: "3.1.11"
+          version: "3.1.17"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -113,7 +113,7 @@ jobs:
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
       - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
         with:
-          version: "3.1.11"
+          version: "3.1.17"
       - name: Install caller dependencies
         shell: bash
         env:
@@ -143,7 +143,7 @@ jobs:
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
       - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
         with:
-          version: "3.1.11"
+          version: "3.1.17"
       - name: Install caller dependencies
         shell: bash
         env:
