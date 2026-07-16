@@ -117,7 +117,7 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
         with:
-          version: "3.1.11"
+          version: "3.1.17"
 
       - name: Install Doppler CLI
         uses: DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4
