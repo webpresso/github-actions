@@ -52,6 +52,11 @@ on:
         required: false
         default: ""
         type: string
+      deploy_github_token:
+        description: "Expose caller GitHub auth to the trusted deploy block; opt in only for GitHub API work"
+        required: false
+        default: false
+        type: boolean
       runner:
         description: "Runner label"
         required: false
@@ -72,6 +77,9 @@ jobs:
       contents: read
       packages: read
       id-token: write
+      # A called workflow cannot elevate the caller token. This is effective
+      # only when a caller explicitly grants issues: write.
+      issues: write
     env:
       DEPLOY_LANE: prd
       RELEASE_VERSION: ${{ inputs.release_version }}
@@ -230,6 +238,8 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ inputs.doppler_identity_id != '' && steps.doppler_oidc.outputs.token || secrets.ci_secret_provider_token }}
           DEPLOY_COMMAND: ${{ inputs.deploy_command }}
+          GITHUB_TOKEN: ${{ inputs.deploy_github_token && secrets.GITHUB_TOKEN || '' }}
+          GH_TOKEN: ${{ inputs.deploy_github_token && secrets.GITHUB_TOKEN || '' }}
         run: |
           set -euo pipefail
           if [[ -z "${DOPPLER_TOKEN}" ]]; then

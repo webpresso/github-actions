@@ -42,6 +42,9 @@ Security contract:
   smoke check, receives `RELEASE_ID` from the deploy step's `release_id` output,
   and never turns the failed workflow green
 - secret-bearing third-party actions are pinned by full commit SHA
+- GitHub authentication is absent from deploy blocks by default. A trusted
+  caller may set `deploy_github_token: true` and must explicitly grant only the
+  GitHub permission that block needs; the called workflow cannot elevate it.
 
 Deployment callers must now pass these inputs explicitly:
 
