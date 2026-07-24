@@ -8,6 +8,7 @@ Current workflows:
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
 - `.github/workflows/changesets-release.yml`
+- `.github/workflows/agent-kit-freshness.yml`
 - `.github/actions/setup-webpresso-toolchain/action.yml`
 
 Consumers should pin reusable workflow references by full commit SHA.
@@ -63,3 +64,47 @@ enforces the same contract again at execution time. Callers using Doppler OIDC
 set `doppler_identity_id` and omit `ci_secret_provider_token`. To enable
 rollback, the caller's deploy block writes `release_id=<id>` to
 `$GITHUB_OUTPUT` and reads the provided `RELEASE_ID` in `rollback_command`.
+
+## agent-kit freshness (`agent-kit-freshness.yml`)
+
+Consumers pin `@webpresso/agent-kit` in their own workflow YAML (an env
+assignment, a shell default, a `setup-wp` `with: version:` input, or a
+composite action's `agent-kit-version` input default), and those pins tend to
+go stale because nothing else in the ecosystem watches them — Renovate isn't
+installed on these orgs and Dependabot can't read a version out of arbitrary
+workflow YAML. This reusable workflow closes that gap: it resolves the latest
+published `@webpresso/agent-kit` version from npm, scans the calling repo's
+own `.github/**/*.yml`/`.yaml` files for the four known pin shapes, and opens
+(or updates) a single PR bumping every stale pin. If it finds *zero* pins in a
+repo that called it, it fails the run instead of passing silently — that's
+the signal that the pin shape drifted and the scan needs fixing, not a
+"nothing to do" result.
+
+It runs entirely on the caller's own `GITHUB_TOKEN` (no PAT, no GitHub App) and
+never runs `wp setup`. It does not touch `setup-wp`'s exact-version install
+contract described above.
+
+Add a tiny scheduled caller workflow to adopt it:
+
+```yaml
+# .github/workflows/agent-kit-freshness.yml
+name: agent-kit freshness
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  freshness:
+    uses: webpresso/github-actions/.github/workflows/agent-kit-freshness.yml@<full-commit-sha>
+```
+
+The caller workflow's own `permissions:` block above is required: a called
+reusable workflow can narrow the caller's token but never elevate it, so
+without `contents: write` and `pull-requests: write` here the called job
+cannot push the bump branch or open the PR.

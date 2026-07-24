@@ -10,10 +10,19 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_RELEASE = File.join(REPO_ROOT, ".github", "workflows", "changesets-release.yml")
   WORKFLOW_CI = File.join(REPO_ROOT, ".github", "workflows", "webpresso-ci.yml")
   WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
+  WORKFLOW_AGENT_KIT_FRESHNESS = File.join(REPO_ROOT, ".github", "workflows", "agent-kit-freshness.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
   SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
   SETUP_WP_USES = "webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88"
   SETUP_WP_VERSION = "3.1.17"
+
+  # agent-kit-freshness.yml is not a caller-consuming CI/deploy workflow: it
+  # is a repo-maintenance automation (npm registry lookup + git + gh CLI)
+  # that keeps other workflows' agent-kit pins fresh. It deliberately does
+  # not install pnpm/Vite+/wp -- pulling in the shared toolchain for it would
+  # be pure scope creep. Exclude it from the toolchain-required invariant
+  # below; its own contract lives in agent-kit-freshness.contract.test.cjs.
+  NON_TOOLCHAIN_WORKFLOWS = [WORKFLOW_AGENT_KIT_FRESHNESS].freeze
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)
@@ -250,6 +259,8 @@ class WorkflowContractTest < Minitest::Test
       refute_includes contents, "/tmp/webpresso-cli-globals", path
       refute_match(/npm\s+install\s+-g\s+\$\(cat\s+[^)]*\)/, contents, "#{path} should not install globals from cat output inline")
 
+      next if NON_TOOLCHAIN_WORKFLOWS.include?(path)
+
       toolchain_steps = all_steps(load_yaml(path)).select { |step| step["uses"] == SETUP_TOOLCHAIN_USES }
       refute_empty toolchain_steps, path
       toolchain_steps.each do |step|
@@ -259,7 +270,7 @@ class WorkflowContractTest < Minitest::Test
   end
 
   def test_every_reusable_toolchain_workflow_uses_caller_versioned_agent_kit_setup
-    workflow_paths = Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort
+    workflow_paths = Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort - NON_TOOLCHAIN_WORKFLOWS
     toolchain_workflow_paths = workflow_paths.select do |path|
       all_uses(load_yaml(path)).include?(SETUP_TOOLCHAIN_USES)
     end
@@ -342,6 +353,25 @@ class WorkflowContractTest < Minitest::Test
     assert_step_uses(WORKFLOW_SECURITY, "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7")
     assert_step_uses(WORKFLOW_SECURITY, "google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2")
     assert_step_uses(WORKFLOW_SECURITY, SETUP_TOOLCHAIN_USES)
+  end
+
+  def test_agent_kit_freshness_workflow_is_a_deliberate_toolchain_exception
+    assert File.exist?(WORKFLOW_AGENT_KIT_FRESHNESS), "expected #{WORKFLOW_AGENT_KIT_FRESHNESS} to exist"
+    workflow = load_yaml(WORKFLOW_AGENT_KIT_FRESHNESS)
+    on_section = workflow["on"] || workflow[true]
+    assert on_section.key?("workflow_call"), "must be callable as a reusable workflow"
+    assert on_section.key?("workflow_dispatch"), "must be manually exercisable without waiting for a schedule"
+
+    job = workflow.dig("jobs", "freshness")
+    refute_nil job, "expected a `freshness` job"
+    assert_equal "write", job.dig("permissions", "contents")
+    assert_equal "write", job.dig("permissions", "pull-requests")
+
+    # Deliberately excluded from the shared-toolchain invariant above: this
+    # is a repo-maintenance automation, not a caller-consuming CI/deploy
+    # workflow, so it does not install pnpm/Vite+/wp.
+    refute_includes all_uses(workflow), SETUP_TOOLCHAIN_USES
+    refute_includes all_uses(workflow), SETUP_WP_USES
   end
 
   private
