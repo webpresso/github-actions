@@ -84,7 +84,14 @@ It runs entirely on the caller's own `GITHUB_TOKEN` (no PAT, no GitHub App) and
 never runs `wp setup`. It does not touch `setup-wp`'s exact-version install
 contract described above.
 
-Add a tiny scheduled caller workflow to adopt it:
+This is a **caller-scheduled reusable workflow**: it declares only
+`workflow_call` and `workflow_dispatch`, so it has no `schedule:` trigger of its
+own. The cadence lives in the caller's workflow. (Adding a `schedule:` here
+would scan *this* library instead of the consumer repository, which is not what
+the workflow is for.) A contract test pins that trigger set so this description
+and the YAML cannot drift apart.
+
+Add a tiny caller workflow — this is where the schedule lives — to adopt it:
 
 ```yaml
 # .github/workflows/agent-kit-freshness.yml

@@ -13,9 +13,51 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_AGENT_KIT_FRESHNESS = File.join(REPO_ROOT, ".github", "workflows", "agent-kit-freshness.yml")
   WORKFLOW_SELF_TEST = File.join(REPO_ROOT, ".github", "workflows", "self-test.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
-  SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
-  SETUP_WP_USES = "webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88"
-  SETUP_WP_VERSION = "3.1.17"
+
+  TOOLCHAIN_USES_PATTERN = %r{/setup-webpresso-toolchain@}.freeze
+  SETUP_WP_USES_PATTERN = %r{/setup-wp@}.freeze
+  FULL_SHA_SUFFIX = /@[a-f0-9]{40}\z/.freeze
+  EXACT_SEMVER = /\A\d+\.\d+\.\d+\z/.freeze
+
+  # The setup-wp SHA, the toolchain SHA, and the agent-kit version each live at
+  # many irreducible YAML sites. Hardcoding them here would make this file one
+  # more site every freshness bump has to edit, so the expected value is derived
+  # from a single canonical workflow at runtime; what the suite asserts is
+  # cross-site agreement plus value shape.
+  CANONICAL_PIN_WORKFLOW = WORKFLOW_CI
+
+  def self.collect_uses(node)
+    case node
+    when Hash
+      node.flat_map { |key, value| key == "uses" ? [value] : collect_uses(value) }
+    when Array
+      node.flat_map { |value| collect_uses(value) }
+    else
+      []
+    end.compact
+  end
+
+  def self.sole(values, label)
+    unique = values.uniq
+    unless unique.length == 1
+      raise "expected exactly one distinct #{label} in #{CANONICAL_PIN_WORKFLOW}, got #{unique.length}"
+    end
+    unique.first
+  end
+
+  CANONICAL_WORKFLOW = YAML.load_file(CANONICAL_PIN_WORKFLOW)
+  SETUP_TOOLCHAIN_USES = sole(collect_uses(CANONICAL_WORKFLOW).grep(TOOLCHAIN_USES_PATTERN), "toolchain pin")
+  SETUP_WP_USES = sole(collect_uses(CANONICAL_WORKFLOW).grep(SETUP_WP_USES_PATTERN), "setup-wp pin")
+  SETUP_WP_VERSION = sole(
+    CANONICAL_WORKFLOW
+      .fetch("jobs")
+      .values
+      .flat_map { |job| Array(job["steps"]) }
+      .select { |step| step["uses"] == SETUP_WP_USES }
+      .map { |step| step.fetch("with", {})["version"] }
+      .compact,
+    "setup-wp version",
+  )
 
   # agent-kit-freshness.yml is not a caller-consuming CI/deploy workflow: it
   # is a repo-maintenance automation (npm registry lookup + git + gh CLI)
@@ -314,6 +356,38 @@ class WorkflowContractTest < Minitest::Test
     Dir.glob(File.join(REPO_ROOT, ".github", "workflows", "*.yml")).sort
   end
 
+  def workflow_and_action_paths
+    Dir.glob(File.join(REPO_ROOT, ".github", "{workflows,actions}", "**", "*.yml")).sort
+  end
+
+  def test_canonical_pins_are_correctly_shaped
+    assert_match(FULL_SHA_SUFFIX, SETUP_TOOLCHAIN_USES)
+    assert_match(FULL_SHA_SUFFIX, SETUP_WP_USES)
+    assert_match(EXACT_SEMVER, SETUP_WP_VERSION)
+  end
+
+  def test_pin_values_agree_across_every_site
+    toolchain = workflow_and_action_paths.flat_map do |path|
+      self.class.collect_uses(load_yaml(path)).grep(TOOLCHAIN_USES_PATTERN)
+    end
+    refute_empty toolchain
+    assert_equal [SETUP_TOOLCHAIN_USES], toolchain.uniq
+
+    setup_wp = workflow_and_action_paths.flat_map do |path|
+      self.class.collect_uses(load_yaml(path)).grep(SETUP_WP_USES_PATTERN)
+    end
+    refute_empty setup_wp
+    assert_equal [SETUP_WP_USES], setup_wp.uniq
+
+    versions = workflow_and_action_paths.flat_map do |path|
+      collect_steps(load_yaml(path))
+        .select { |step| step["uses"].to_s.match?(SETUP_WP_USES_PATTERN) }
+        .map { |step| step.fetch("with", {})["version"] || "<missing in #{path}>" }
+    end
+    refute_empty versions
+    assert_equal [SETUP_WP_VERSION], versions.uniq
+  end
+
   def test_all_workflow_and_action_uses_are_full_sha_pins
     Dir.glob(File.join(REPO_ROOT, ".github", "{workflows,actions}", "**", "*.yml")).each do |path|
       uses_values = all_uses(load_yaml(path))
@@ -422,6 +496,21 @@ class WorkflowContractTest < Minitest::Test
   def all_steps(workflow)
     workflow.fetch("jobs").values.flat_map do |job|
       Array(job["steps"])
+    end
+  end
+
+  # Every `steps:` entry anywhere in a document: reaches a composite action's
+  # `runs.steps` as well as a workflow's `jobs.*.steps`.
+  def collect_steps(node)
+    case node
+    when Hash
+      node.flat_map do |key, value|
+        key == "steps" && value.is_a?(Array) ? value.select { |step| step.is_a?(Hash) } : collect_steps(value)
+      end
+    when Array
+      node.flat_map { |value| collect_steps(value) }
+    else
+      []
     end
   end
 

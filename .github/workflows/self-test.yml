@@ -31,6 +31,8 @@ jobs:
         with:
           node-version: "24"
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
       # Structural contracts over the workflow/action YAML (pins, permissions,
       # secret-sink scoping, toolchain wiring).
       - name: Workflow contract tests
@@ -40,3 +42,9 @@ jobs:
       # their heredocs and executed against real git fixtures.
       - name: Embedded-script contract tests
         run: node --test .github/workflows/*.contract.test.cjs
+
+      # The ported Bun suite. Runs alongside the two legacy suites for exactly
+      # one commit so parity is proven by co-execution rather than by trust;
+      # the legacy suites are deleted in the next commit.
+      - name: Unified Bun contract suite
+        run: bun test
