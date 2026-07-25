@@ -11,6 +11,7 @@ class WorkflowContractTest < Minitest::Test
   WORKFLOW_CI = File.join(REPO_ROOT, ".github", "workflows", "webpresso-ci.yml")
   WORKFLOW_SECURITY = File.join(REPO_ROOT, ".github", "workflows", "webpresso-security.yml")
   WORKFLOW_AGENT_KIT_FRESHNESS = File.join(REPO_ROOT, ".github", "workflows", "agent-kit-freshness.yml")
+  WORKFLOW_SELF_TEST = File.join(REPO_ROOT, ".github", "workflows", "self-test.yml")
   ACTION_TOOLCHAIN = File.join(REPO_ROOT, ".github", "actions", "setup-webpresso-toolchain", "action.yml")
   SETUP_TOOLCHAIN_USES = "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379"
   SETUP_WP_USES = "webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88"
@@ -22,7 +23,13 @@ class WorkflowContractTest < Minitest::Test
   # not install pnpm/Vite+/wp -- pulling in the shared toolchain for it would
   # be pure scope creep. Exclude it from the toolchain-required invariant
   # below; its own contract lives in agent-kit-freshness.contract.test.cjs.
-  NON_TOOLCHAIN_WORKFLOWS = [WORKFLOW_AGENT_KIT_FRESHNESS].freeze
+  #
+  # self-test.yml is this repository's own CI gate: it runs the contract suites
+  # against the repo itself and is never called by a consumer. Installing the
+  # shared toolchain (pnpm/Vite+/wp) for a Ruby+Node test run would be pure
+  # scope creep, so it is excluded from the toolchain-required invariant too.
+  # Its own contract is test_self_test_workflow_gates_both_contract_suites.
+  NON_TOOLCHAIN_WORKFLOWS = [WORKFLOW_AGENT_KIT_FRESHNESS, WORKFLOW_SELF_TEST].freeze
 
   def test_preview_workflow_bootstrap_contract_and_pins
     workflow = load_yaml(WORKFLOW_PREVIEW)
@@ -370,6 +377,33 @@ class WorkflowContractTest < Minitest::Test
     # Deliberately excluded from the shared-toolchain invariant above: this
     # is a repo-maintenance automation, not a caller-consuming CI/deploy
     # workflow, so it does not install pnpm/Vite+/wp.
+    refute_includes all_uses(workflow), SETUP_TOOLCHAIN_USES
+    refute_includes all_uses(workflow), SETUP_WP_USES
+  end
+
+  # The gate that makes every other test in this file binding. Without an
+  # executor the suites are documentation: a broken contract merges green
+  # because nothing ran it. Pin the trigger and both invocations so the gate
+  # cannot be silently narrowed or gutted.
+  def test_self_test_workflow_gates_both_contract_suites
+    assert File.exist?(WORKFLOW_SELF_TEST), "expected #{WORKFLOW_SELF_TEST} to exist"
+    workflow = load_yaml(WORKFLOW_SELF_TEST)
+    on_section = workflow["on"] || workflow[true]
+    assert on_section.key?("pull_request"), "contract suites must gate every pull request"
+    assert_equal ["main"], on_section.dig("push", "branches"), "main must stay proven after merge"
+
+    assert_equal "read", workflow.dig("permissions", "contents")
+    assert_nil workflow.dig("permissions", "pull-requests"), "read-only gate needs no write scope"
+
+    job = workflow.dig("jobs", "contract-tests")
+    refute_nil job, "expected a `contract-tests` job"
+    commands = Array(job["steps"]).map { |step| step["run"] }.compact
+    assert_includes commands, "ruby -Itest test/workflow_contract_test.rb"
+    assert_includes commands, "node --test .github/workflows/*.contract.test.cjs"
+
+    # Deliberately excluded from the shared-toolchain invariant above: this
+    # gate runs Ruby and Node against the repo itself and is never called by a
+    # consumer, so it does not install pnpm/Vite+/wp.
     refute_includes all_uses(workflow), SETUP_TOOLCHAIN_USES
     refute_includes all_uses(workflow), SETUP_WP_USES
   end

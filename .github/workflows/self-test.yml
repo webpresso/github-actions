@@ -1,0 +1,42 @@
+name: Self-test
+
+# This repository ships reusable workflows and composite actions; its contract
+# tests treat that YAML as data. Until this workflow existed the suites ran
+# only when a developer remembered two undocumented local commands, so a broken
+# contract could merge unnoticed. This is the gate that makes them binding.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.4"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      # Structural contracts over the workflow/action YAML (pins, permissions,
+      # secret-sink scoping, toolchain wiring).
+      - name: Workflow contract tests
+        run: ruby -Itest test/workflow_contract_test.rb
+
+      # Behavioral contracts: the embedded scan scripts are extracted from
+      # their heredocs and executed against real git fixtures.
+      - name: Embedded-script contract tests
+        run: node --test .github/workflows/*.contract.test.cjs
