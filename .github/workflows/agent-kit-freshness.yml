@@ -1,0 +1,231 @@
+name: Reusable agent-kit freshness
+
+# Keeps pinned @webpresso/agent-kit versions from going stale. Scans the
+# calling repo's checked-out .github/**/*.yml|yaml files for the known pin
+# shapes (env assignment, shell default, setup-wp `with: version:`, composite
+# `agent-kit-version` input default), and opens (or updates) a single PR that
+# bumps every stale pin to the latest published npm version.
+#
+# Deliberately scoped to @webpresso/agent-kit only -- this is not a general
+# dependency freshness tool. It does not touch the setup-wp action's
+# exact-version contract, and it never runs `wp setup`.
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  freshness:
+    name: agent-kit-freshness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24.16.0"
+
+      - name: Resolve latest published @webpresso/agent-kit version
+        id: latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(npm view @webpresso/agent-kit version)"
+          if [[ ! "${latest}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::npm view returned an unexpected value for @webpresso/agent-kit: '${latest}'"
+            exit 1
+          fi
+          echo "version=${latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan repository for agent-kit version pins and bump stale ones
+        id: scan
+        shell: bash
+        env:
+          LATEST_VERSION: ${{ steps.latest.outputs.version }}
+          PR_BODY_FILE: ${{ runner.temp }}/agent-kit-freshness-pr-body.md
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const { execFileSync } = require("node:child_process");
+
+          const LATEST = (process.env.LATEST_VERSION || "").trim();
+          if (!/^\d+\.\d+\.\d+$/.test(LATEST)) {
+            throw new Error(`LATEST_VERSION must be an exact semver, got: "${LATEST}"`);
+          }
+
+          const SEMVER = "\\d+\\.\\d+\\.\\d+";
+          const ENV_RE = new RegExp(`(?<![A-Za-z0-9_])AGENT_KIT_VERSION=(${SEMVER})\\b`, "gu");
+          const SHELL_DEFAULT_RE = new RegExp(`WP_SETUP_AGENT_KIT_VERSION:-(${SEMVER})\\b`, "gu");
+          const SETUP_WP_USES_RE = /uses:\s*\S*\/setup-wp@/u;
+          const VERSION_LINE_RE = new RegExp(`^(\\s*)version:\\s*(["']?)(${SEMVER})\\2\\s*(#.*)?$`, "u");
+          const COMPOSITE_KEY_RE = /^\s*agent-kit-version:\s*(#.*)?$/u;
+          const DEFAULT_LINE_RE = new RegExp(`^(\\s*)default:\\s*(["']?)(${SEMVER})\\2\\s*(#.*)?$`, "u");
+          const LOOKAHEAD_LIMIT = 4;
+
+          function olderThanLatest(version) {
+            const a = version.split(".").map(Number);
+            const b = LATEST.split(".").map(Number);
+            for (let i = 0; i < 3; i += 1) {
+              if (a[i] !== b[i]) return a[i] < b[i];
+            }
+            return false;
+          }
+
+          function candidateFiles() {
+            return execFileSync("git", ["ls-files"], { encoding: "utf8" })
+              .split("\n")
+              .filter((line) => /^\.github\/.*\.ya?ml$/u.test(line));
+          }
+
+          function scanAndBumpFile(relPath) {
+            const original = fs.readFileSync(relPath, "utf8");
+            const lines = original.split("\n");
+            const findings = [];
+            let pendingSetupWpAt = -1;
+            let pendingCompositeKeyAt = -1;
+
+            for (let i = 0; i < lines.length; i += 1) {
+              const line = lines[i];
+              const lineNo = i + 1;
+
+              for (const m of line.matchAll(ENV_RE)) {
+                const oldValue = m[1];
+                findings.push({ shape: "env-assignment", file: relPath, line: lineNo, oldValue });
+                if (olderThanLatest(oldValue)) {
+                  lines[i] = lines[i].replace(`AGENT_KIT_VERSION=${oldValue}`, `AGENT_KIT_VERSION=${LATEST}`);
+                }
+              }
+
+              for (const m of line.matchAll(SHELL_DEFAULT_RE)) {
+                const oldValue = m[1];
+                findings.push({ shape: "shell-default", file: relPath, line: lineNo, oldValue });
+                if (olderThanLatest(oldValue)) {
+                  lines[i] = lines[i].replace(
+                    `WP_SETUP_AGENT_KIT_VERSION:-${oldValue}`,
+                    `WP_SETUP_AGENT_KIT_VERSION:-${LATEST}`,
+                  );
+                }
+              }
+
+              if (SETUP_WP_USES_RE.test(line)) {
+                pendingSetupWpAt = i;
+              } else if (pendingSetupWpAt >= 0) {
+                const m = VERSION_LINE_RE.exec(line);
+                if (m) {
+                  const oldValue = m[3];
+                  findings.push({ shape: "setup-wp-input", file: relPath, line: lineNo, oldValue });
+                  if (olderThanLatest(oldValue)) {
+                    lines[i] = `${m[1]}version: ${m[2]}${LATEST}${m[2]}${m[4] ? ` ${m[4]}` : ""}`;
+                  }
+                  pendingSetupWpAt = -1;
+                } else if (/^\s*-\s/u.test(line) || i - pendingSetupWpAt > LOOKAHEAD_LIMIT) {
+                  pendingSetupWpAt = -1;
+                }
+              }
+
+              if (COMPOSITE_KEY_RE.test(line)) {
+                pendingCompositeKeyAt = i;
+              } else if (pendingCompositeKeyAt >= 0) {
+                const m = DEFAULT_LINE_RE.exec(line);
+                if (m) {
+                  const oldValue = m[3];
+                  findings.push({ shape: "composite-input-default", file: relPath, line: lineNo, oldValue });
+                  if (olderThanLatest(oldValue)) {
+                    lines[i] = `${m[1]}default: ${m[2]}${LATEST}${m[2]}${m[4] ? ` ${m[4]}` : ""}`;
+                  }
+                  pendingCompositeKeyAt = -1;
+                } else if (i - pendingCompositeKeyAt > LOOKAHEAD_LIMIT) {
+                  pendingCompositeKeyAt = -1;
+                }
+              }
+            }
+
+            const updated = lines.join("\n");
+            if (updated !== original) {
+              fs.writeFileSync(relPath, updated, "utf8");
+            }
+            return findings;
+          }
+
+          const files = candidateFiles();
+          let totalFindings = 0;
+          const bumped = [];
+          for (const file of files) {
+            const findings = scanAndBumpFile(file);
+            totalFindings += findings.length;
+            for (const finding of findings) {
+              if (olderThanLatest(finding.oldValue)) {
+                bumped.push(finding);
+              }
+            }
+          }
+
+          if (totalFindings === 0) {
+            console.error(
+              "::error::No @webpresso/agent-kit version pins found under .github/**/*.yml. " +
+                "The known pin shapes (env assignment, shell default, setup-wp `with: version:`, " +
+                "composite `agent-kit-version` input default) may have drifted from this repo's " +
+                "files -- fix the scan patterns instead of letting this pass silently.",
+            );
+            process.exit(1);
+          }
+
+          const changed = bumped.length > 0;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `pins_found=${totalFindings}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `pins_bumped=${bumped.length}\n`);
+
+          console.log(`Scanned ${files.length} file(s) under .github/, found ${totalFindings} @webpresso/agent-kit pin(s).`);
+
+          if (changed) {
+            const bodyLines = [
+              `Bumps every pinned \`@webpresso/agent-kit\` reference to the latest published version \`${LATEST}\`.`,
+              "",
+              "| Shape | File | Line | Old |",
+              "| --- | --- | --- | --- |",
+              ...bumped.map((f) => `| ${f.shape} | \`${f.file}\` | ${f.line} | ${f.oldValue} |`),
+              "",
+              "Opened automatically by the `agent-kit-freshness` reusable workflow.",
+            ];
+            fs.writeFileSync(process.env.PR_BODY_FILE, `${bodyLines.join("\n")}\n`, "utf8");
+            for (const f of bumped) {
+              console.log(`bump: ${f.shape} ${f.file}:${f.line} ${f.oldValue} -> ${LATEST}`);
+            }
+          } else {
+            console.log(`All pins already at latest (${LATEST}); nothing to do.`);
+          }
+          NODE
+
+      - name: Open or update the version-bump pull request
+        if: steps.scan.outputs.changed == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_VERSION: ${{ steps.latest.outputs.version }}
+          PR_BODY_FILE: ${{ runner.temp }}/agent-kit-freshness-pr-body.md
+          BRANCH: chore/bump-agent-kit-version
+        run: |
+          set -euo pipefail
+          default_branch="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+          title="chore(deps): bump @webpresso/agent-kit pins to ${LATEST_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BRANCH}"
+          git add -A
+          git commit -m "${title}"
+          git push --force origin "HEAD:refs/heads/${BRANCH}"
+
+          existing="$(gh pr list --head "${BRANCH}" --state open --json number -q '.[0].number // empty')"
+          if [[ -n "${existing}" ]]; then
+            gh pr edit "${existing}" --title "${title}" --body-file "${PR_BODY_FILE}"
+          else
+            gh pr create --title "${title}" --body-file "${PR_BODY_FILE}" --base "${default_branch}" --head "${BRANCH}"
+          fi
