@@ -13,6 +13,29 @@ Current workflows:
 
 Consumers should pin reusable workflow references by full commit SHA.
 
+## Contributing: the contract tests
+
+The workflows and composite actions in this repo are consumed by every
+Webpresso repository, so their YAML is covered by a contract suite that treats
+it as data — pins, permission scopes, secret-sink boundaries, and the embedded
+workflow scripts (which are extracted from their heredocs and executed against
+real git fixtures).
+
+**Prerequisite:** [Bun](https://bun.sh) >= 1.2 (for `Bun.YAML`). **Command:**
+
+```bash
+bun test
+```
+
+That is the whole thing: no `package.json`, no dependency install, no other
+runtime to provision. The suite lives in `test/*.test.ts` and shares
+`test/helpers.ts`. `node` is used *inside* the tests to execute the workflows'
+embedded scripts, matching what the GitHub Actions runner does; it is
+preinstalled on GitHub-hosted runners and on any normal dev machine.
+
+`.github/workflows/self-test.yml` runs `bun test` on every pull request and on
+every push to `main`, so a broken contract cannot merge green.
+
 Shared toolchain action (`setup-webpresso-toolchain`):
 - resolves the caller's pnpm version from `package.json` and configures pnpm, Node.js, Corepack, Vite+, and (optionally) Bun
 - installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
