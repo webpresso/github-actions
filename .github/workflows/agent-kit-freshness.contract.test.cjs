@@ -8,10 +8,31 @@ const { test } = require("node:test");
 const WORKFLOW_PATH = join(__dirname, "agent-kit-freshness.yml");
 const workflow = readFileSync(WORKFLOW_PATH, "utf8");
 
-function extractEmbeddedScript() {
-  const match = workflow.match(/node <<'NODE'\n([\s\S]*?)^\s*NODE$/mu);
-  assert.ok(match, "expected an embedded NODE heredoc script in agent-kit-freshness.yml");
-  return match[1];
+/** Matches every `node <<'NODE' … NODE` embedded script body (interior only). */
+const EMBEDDED_NODE_HEREDOC_RE = /node <<'NODE'\n([\s\S]*?)^\s*NODE$/gmu;
+
+/**
+ * Strip every embedded NODE heredoc (delimiters + body) so YAML-only analysis
+ * cannot be confused by JS source that mentions the string `uses:`.
+ * Must be global: replacing only the first body would leave later heredocs in
+ * place and could miss real YAML `uses:` lines that follow them.
+ */
+function stripEmbeddedNodeHeredocs(text) {
+  return text.replace(/node <<'NODE'\n[\s\S]*?^\s*NODE$/gmu, "");
+}
+
+function extractEmbeddedScripts(text = workflow) {
+  const scripts = [];
+  for (const match of text.matchAll(EMBEDDED_NODE_HEREDOC_RE)) {
+    scripts.push(match[1]);
+  }
+  assert.ok(scripts.length > 0, "expected at least one embedded NODE heredoc in agent-kit-freshness.yml");
+  return scripts;
+}
+
+function extractEmbeddedScript(text = workflow) {
+  // The scan/bump script is the first NODE heredoc in the workflow.
+  return extractEmbeddedScripts(text)[0];
 }
 
 function writeFixtureFile(dir, relPath, contents) {
@@ -33,10 +54,9 @@ function initFixtureRepo(files) {
   return dir;
 }
 
-function runScanScript({ latest, cwd }) {
-  const script = extractEmbeddedScript();
+function runScanScript({ latest, cwd, scriptSource = extractEmbeddedScript() }) {
   const scriptPath = join(cwd, "__scan.cjs");
-  writeFileSync(scriptPath, script);
+  writeFileSync(scriptPath, scriptSource);
   const githubOutput = join(cwd, "__github_output.txt");
   const prBodyFile = join(cwd, "__pr_body.md");
   writeFileSync(githubOutput, "");
@@ -60,10 +80,15 @@ test("agent-kit-freshness.yml declares workflow_call and workflow_dispatch trigg
   assert.match(workflow, /permissions:\n\s+contents: write\n\s+pull-requests: write/u);
 });
 
-test("agent-kit-freshness.yml uses a fixed idempotent branch name and edits an existing open PR instead of duplicating it", () => {
+test("agent-kit-freshness.yml uses a fixed idempotent branch name and refreshes title+body when editing an existing open PR", () => {
   assert.match(workflow, /BRANCH: chore\/bump-agent-kit-version/u);
   assert.match(workflow, /gh pr list --head "\$\{BRANCH\}" --state open/u);
-  assert.match(workflow, /gh pr edit "\$\{existing\}"/u);
+  // Idempotent re-runs must refresh both title and body so a stale version
+  // number cannot linger on an existing open PR (Opus nit).
+  assert.match(
+    workflow,
+    /gh pr edit "\$\{existing\}" --title "\$\{title\}" --body-file "\$\{PR_BODY_FILE\}"/u,
+  );
   assert.match(workflow, /gh pr create --title/u);
 });
 
@@ -74,9 +99,8 @@ test("agent-kit-freshness.yml only relies on the caller's GITHUB_TOKEN, never a 
 });
 
 test("agent-kit-freshness.yml pins every third-party action reference by full commit SHA", () => {
-  // Scan only the real YAML step lines, not the embedded scan script (which
-  // contains a JS regex literal referencing the string "uses:").
-  const yamlOnly = workflow.replace(extractEmbeddedScript(), "");
+  // Scan only the real YAML step lines, not embedded scan-script source.
+  const yamlOnly = stripEmbeddedNodeHeredocs(workflow);
   let sawUses = false;
   for (const m of yamlOnly.matchAll(/^\s*-\s*uses:\s*(\S+)/gmu)) {
     const value = m[1];
@@ -85,6 +109,41 @@ test("agent-kit-freshness.yml pins every third-party action reference by full co
     assert.match(value, /@[0-9a-f]{40}$/u, `expected full SHA pin for ${value}`);
   }
   assert.ok(sawUses, "expected at least one pinned third-party action reference");
+});
+
+test("stripEmbeddedNodeHeredocs removes every NODE heredoc so later real uses: lines stay scannable", () => {
+  // Synthetic multi-heredoc document: first body contains a JS `uses:` regex
+  // (must not count as a step), a real pinned step sits between heredocs, and a
+  // second heredoc follows. First-only strip would leave the second body and
+  // could confuse analysis; full strip must preserve the real step.
+  const synthetic = [
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: |",
+    "          node <<'NODE'",
+    "          const re = /uses:\\s*\\S+/u;",
+    "          NODE",
+    "      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567",
+    "      - run: |",
+    "          node <<'NODE'",
+    "          // second embedded script also mentions uses:",
+    "          const again = 'uses: evil@v1';",
+    "          NODE",
+    "      - uses: actions/setup-node@fedcba9876543210fedcba9876543210fedcba98",
+    "",
+  ].join("\n");
+
+  const yamlOnly = stripEmbeddedNodeHeredocs(synthetic);
+  assert.doesNotMatch(yamlOnly, /node <<'NODE'/u);
+  assert.doesNotMatch(yamlOnly, /const re = /u);
+  assert.doesNotMatch(yamlOnly, /const again = /u);
+
+  const pins = [...yamlOnly.matchAll(/^\s*-\s*uses:\s*(\S+)/gmu)].map((m) => m[1]);
+  assert.deepEqual(pins, [
+    "actions/checkout@0123456789abcdef0123456789abcdef01234567",
+    "actions/setup-node@fedcba9876543210fedcba9876543210fedcba98",
+  ]);
 });
 
 test("embedded scan script has valid syntax", () => {
@@ -99,8 +158,7 @@ test("embedded scan script has valid syntax", () => {
 
 test("scan script matches all four documented pin shapes and bumps them to latest, leaving unrelated version: keys untouched", () => {
   const dir = initFixtureRepo({
-    // Shape 1 (env/shell assignment) + shape 2 (shell default), reproducing
-    // edge-matte ci.yml:31 and ingest-lens ci.yml:87.
+    // Shape 1 (env assignment) + shape 2 (shell default) + shape 3 (setup-wp).
     ".github/workflows/ci.yml": [
       "name: ci",
       "on: [push]",
@@ -121,8 +179,7 @@ test("scan script matches all four documented pin shapes and bumps them to lates
       "          release_version: 3.1.17",
       "",
     ].join("\n"),
-    // Shape 4 (composite input default), reproducing
-    // monorepo .github/actions/setup-ci-workspace/action.yml:12.
+    // Shape 4 (composite input default).
     ".github/actions/setup-ci-workspace/action.yml": [
       "name: setup-ci-workspace",
       "inputs:",
@@ -149,7 +206,6 @@ test("scan script matches all four documented pin shapes and bumps them to lates
   assert.match(ci, /AGENT_KIT_VERSION=3\.1\.30/u);
   assert.match(ci, /WP_SETUP_AGENT_KIT_VERSION:-3\.1\.30/u);
   assert.match(ci, /version: "3\.1\.30"/u);
-  // Unrelated `version:`/`release_version:` keys must be left untouched.
   assert.match(ci, /version: \$\{\{ steps\.pnpm\.outputs\.version \}\}/u);
   assert.match(ci, /release_version: 3\.1\.17/u);
 
@@ -158,6 +214,36 @@ test("scan script matches all four documented pin shapes and bumps them to lates
 
   const prBody = readFileSync(prBodyFile, "utf8");
   assert.match(prBody, /3\.1\.30/u);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("scan script bumps setup-wp with: version (shape 3) in isolation", () => {
+  // Opus nit: shape 3 must have an explicit fixture like shapes 1/2/4.
+  const dir = initFixtureRepo({
+    ".github/workflows/ci.yml": [
+      "name: ci",
+      "on: [push]",
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88",
+      "        with:",
+      '          version: "3.1.17"',
+      "",
+    ].join("\n"),
+  });
+
+  const { result, githubOutput } = runScanScript({ latest: "3.1.30", cwd: dir });
+  assert.equal(result.status, 0, result.stderr);
+  const output = readFileSync(githubOutput, "utf8");
+  assert.match(output, /pins_found=1/u);
+  assert.match(output, /pins_bumped=1/u);
+  assert.match(output, /changed=true/u);
+
+  const ci = readFileSync(join(dir, ".github/workflows/ci.yml"), "utf8");
+  assert.match(ci, /version: "3\.1\.30"/u);
+  assert.doesNotMatch(ci, /version: "3\.1\.17"/u);
 
   rmSync(dir, { recursive: true, force: true });
 });
