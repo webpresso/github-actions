@@ -11,7 +11,7 @@ inputs:
     required: true
   github-token:
     description: >
-      Token that can read private webpresso/agent-kit releases. Defaults to
+      Token that can read private webpresso/app (source monorepo) releases. Defaults to
       github.token; pass CI_AGENT_KIT_TOKEN when the monorepo token cannot.
     required: false
     default: ""
@@ -52,7 +52,7 @@ runs:
             ;;
         esac
 
-        release_api="https://api.github.com/repos/webpresso/agent-kit/releases/tags/v${WP_VERSION}"
+        release_api="https://api.github.com/repos/webpresso/app/releases/tags/v${WP_VERSION}"
         http_code="$(curl -sS -o /tmp/ak-release.json -w '%{http_code}' \
           -H "Authorization: Bearer ${token}" \
           -H "Accept: application/vnd.github+json" \
@@ -107,7 +107,7 @@ runs:
           # Fallback for releases that predate agent-kit-package.tgz:
           # tag source tree still ships src/ migrations + catalog.
           echo "agent-kit-package.tgz missing; falling back to tag source archive"
-          archive_url="https://api.github.com/repos/webpresso/agent-kit/tarball/v${WP_VERSION}"
+          archive_url="https://api.github.com/repos/webpresso/app/tarball/v${WP_VERSION}"
           curl -fsSL --retry 3 --retry-delay 2 \
             -H "Authorization: Bearer ${token}" \
             -H "Accept: application/vnd.github+json" \
