@@ -38,6 +38,11 @@ on:
       package_name:
         description: "Caller package name reported by the release-prep result"
         value: ${{ jobs.release.outputs.package_name }}
+    secrets:
+      CI_AGENT_KIT_TOKEN:
+        description: Token to read private agent-kit GitHub release assets
+        required: false
+
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
