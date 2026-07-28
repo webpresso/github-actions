@@ -49,9 +49,10 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
 
-      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
+      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
         with:
-          version: "3.1.17"
+          version: "3.3.6"
+          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
 
       - name: Install caller dependencies
         shell: bash
@@ -81,9 +82,10 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
-      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
+      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
         with:
-          version: "3.1.17"
+          version: "3.3.6"
+          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
       - name: Install caller dependencies
         shell: bash
         env:
@@ -111,9 +113,10 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
-      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
+      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
         with:
-          version: "3.1.17"
+          version: "3.3.6"
+          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
       - name: Install caller dependencies
         shell: bash
         env:
@@ -141,9 +144,10 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379
-      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88
+      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
         with:
-          version: "3.1.17"
+          version: "3.3.6"
+          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
       - name: Install caller dependencies
         shell: bash
         env:
