@@ -67,6 +67,9 @@ on:
         default: ubuntu-latest
         type: string
     secrets:
+      CI_AGENT_KIT_TOKEN:
+        description: Token to read private agent-kit GitHub release assets
+        required: false
       ci_secret_provider_token:
         required: false
 
