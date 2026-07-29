@@ -154,16 +154,33 @@ describe("setup-wp package root", () => {
     }
   });
 
-  it("warns rather than fails when the package root lacks blueprint migrations", () => {
+  it("fails loudly when the package root has no catalog", () => {
+    // The caller-visible contract is the catalog, not "a tarball extracted".
+    // wp setup/sync/audit resolve templates and blueprint migrations from it,
+    // so a root without catalog/ is useless and must not pass silently.
     const body = runBody(1);
-    expect(body).toInclude("::warning::");
-    expect(body).not.toMatch(/blueprint migrations[\s\S]{0,120}exit \d/u);
+    expect(body).toMatch(/catalog[\s\S]{0,200}exit \d/u);
   });
 
-  it("keeps accepting the callers' github-token input", () => {
-    // Every reusable workflow in this repo still passes it; removing the input
-    // would make each of them log an unexpected-input warning.
-    expect(dig(action, "inputs", "github-token", "required")).toBe(false);
-    expect(dig(action, "inputs", "github-token", "default")).toBe("");
+  it("reads the package root from the public release, with no token and no fallback", () => {
+    const body = runBody(1);
+
+    // Same release as the binary: one source, one version axis.
+    expect(body).toInclude("${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}");
+
+    // No credential anywhere in the step, and no private-repo escape hatch.
+    // Both existed before and cost the same two things every time: a cross-repo
+    // token, and a pin to the retired 3.x line, because the public 0.0.x line
+    // has no matching source tag. A "fallback" would have preserved both and
+    // let a misconfigured caller drift back onto the retired line silently.
+    expect(body).not.toInclude("GITHUB_TOKEN");
+    expect(body).not.toInclude("Authorization");
+    // The source-tarball API endpoint specifically -- the word "tarball" also
+    // appears in the error text that tells a maintainer to publish the asset.
+    expect(body).not.toMatch(/\/tarball\//u);
+    expect(body).not.toInclude("api.github.com");
+    expect(action).not.toHaveProperty("inputs.github-token");
+    expect(dig(action, "inputs", "package-root-repo")).toBeUndefined();
+    expect(dig(action, "inputs", "package-root-ref")).toBeUndefined();
   });
 });

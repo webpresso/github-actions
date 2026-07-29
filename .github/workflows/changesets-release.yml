@@ -38,12 +38,6 @@ on:
       package_name:
         description: "Caller package name reported by the release-prep result"
         value: ${{ jobs.release.outputs.package_name }}
-    secrets:
-      CI_AGENT_KIT_TOKEN:
-        description: Token to read private agent-kit GitHub release assets
-        required: false
-
-
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -69,10 +63,9 @@ jobs:
         with:
           package-manager-cache: "false"
 
-      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
+      - uses: webpresso/github-actions/.github/actions/setup-wp@a52051119fb868cc1f7ebb2fcdaba769ff116475
         with:
-          version: "3.3.6"
-          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
+          version: "0.0.2"
 
       - name: Install caller dependencies
         shell: bash
