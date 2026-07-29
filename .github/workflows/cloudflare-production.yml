@@ -63,23 +63,6 @@ on:
         default: ubuntu-latest
         type: string
     secrets:
-      CI_AGENT_KIT_TOKEN:
-        # DEPRECATED and no longer used. setup-wp now installs wp from the
-        # PUBLIC webpresso/app-releases repo, so the binary needs no credential.
-        # It is still declared because removing a secret from a reusable
-        # workflow is a breaking change for any caller that still passes it --
-        # GitHub rejects an undeclared secret outright. Drop it once no caller
-        # passes it.
-        #
-        # NOTE for callers running catalog-dependent wp commands (`wp audit`,
-        # `wp sync`, `wp setup`): the new action installs a bare binary and does
-        # NOT export WEBPRESSO_AGENT_KIT_ROOT unless you pass `package-root:
-        # true` (which does need a token, plus package-root-ref). Those command
-        # strings are caller-supplied, so this repo cannot check them for you.
-        description: >-
-          Deprecated; unused. Kept for caller compatibility. See package-root on
-          the setup-wp action if you need the agent-kit catalog assets.
-        required: false
       ci_secret_provider_token:
         required: false
 
