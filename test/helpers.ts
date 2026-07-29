@@ -35,6 +35,7 @@ export const WORKFLOW_SECURITY = join(WORKFLOWS_DIR, "webpresso-security.yml");
 export const WORKFLOW_AGENT_KIT_FRESHNESS = join(WORKFLOWS_DIR, "agent-kit-freshness.yml");
 export const WORKFLOW_SELF_TEST = join(WORKFLOWS_DIR, "self-test.yml");
 export const ACTION_TOOLCHAIN = join(ACTIONS_DIR, "setup-webpresso-toolchain", "action.yml");
+export const ACTION_SETUP_WP = join(ACTIONS_DIR, "setup-wp", "action.yml");
 export const README_PATH = join(REPO_ROOT, "README.md");
 
 /**

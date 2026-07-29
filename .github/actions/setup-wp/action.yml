@@ -1,29 +1,69 @@
 name: Setup global wp
 description: >
-  Install a caller-pinned agent-kit release binary and package root (D-ARCHIVE).
-  Public npm is a no-bin stub; install from GitHub release assets and export
-  WEBPRESSO_AGENT_KIT_ROOT so wp audits resolve migrations/catalog assets.
+  Put a caller-pinned wp release binary on PATH. Prefers a wp already baked into
+  the runner's @actions/tool-cache layout; otherwise downloads the published
+  binary from the PUBLIC webpresso/app-releases repository -- no GitHub API
+  call, no token, no python3.
 
 inputs:
   version:
     description: >
-      Exact agent-kit GitHub release semver without leading v (no ranges/tags).
+      Exact wp release semver without a leading v (no ranges, no dist-tags).
+      Resolved against the public webpresso/app-releases release line.
     required: true
+  release-repo:
+    description: >
+      owner/repo publishing the wp release binaries. Defaults to the public
+      webpresso/app-releases; override only to install from a mirror.
+    required: false
+    default: webpresso/app-releases
+  checksum:
+    description: >
+      Optional sha256 of the downloaded binary. When set, the download is
+      verified against it and the action fails on a mismatch. Ignored on a
+      tool-cache hit (that binary was provisioned by the runner image).
+    required: false
+    default: ""
+  package-root:
+    description: >
+      Install the agent-kit package root (catalog + blueprint migrations) and
+      export WEBPRESSO_AGENT_KIT_ROOT / WP_AGENT_KIT_PACKAGE_ROOT / NODE_PATH.
+      Off by default: current release binaries carry their own assets, and the
+      public release repository is a binary-only shell with no package tarball
+      and no source. Set to true only for a legacy binary that cannot resolve
+      its own assets; `github-token` and `package-root-ref` are then required.
+    required: false
+    default: "false"
+  package-root-repo:
+    description: >
+      owner/repo the package root is read from when `package-root: true`. This
+      is the private source monorepo, not the public release shell.
+    required: false
+    default: webpresso/app
+  package-root-ref:
+    description: >
+      Git ref/tag in `package-root-repo` that provides the package root. The
+      public release line restarted at 0.0.1, so it does NOT track `version`
+      and must be supplied explicitly when `package-root: true`.
+    required: false
+    default: ""
   github-token:
     description: >
-      Token that can read private webpresso/app (source monorepo) releases. Defaults to
-      github.token; pass CI_AGENT_KIT_TOKEN when the monorepo token cannot.
+      DEPRECATED for the binary install, which is now a public, tokenless
+      download. Still accepted (callers keep passing it) and used only when
+      `package-root: true` reads the private `package-root-repo`.
     required: false
     default: ""
 
 runs:
   using: composite
   steps:
-    - name: Install wp binary + package root from agent-kit GitHub release
+    - name: Install wp binary from the public release repository
       shell: bash
       env:
         WP_VERSION: ${{ inputs.version }}
-        GITHUB_TOKEN: ${{ inputs.github-token != '' && inputs.github-token || github.token }}
+        WP_RELEASE_REPO: ${{ inputs.release-repo }}
+        WP_CHECKSUM: ${{ inputs.checksum }}
       run: |
         set -euo pipefail
 
@@ -32,134 +72,152 @@ runs:
           exit 2
         fi
 
-        token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-        if [[ -z "${token}" ]]; then
-          echo "::error::GITHUB_TOKEN required to download private agent-kit release assets"
-          exit 5
-        fi
-
+        os="$(uname -s)"
         arch="$(uname -m)"
-        case "${arch}" in
-          x86_64|amd64) asset="wp-linux-x64" ;;
-          aarch64|arm64)
-            if [[ "$(uname -s)" == "Darwin" ]]; then asset="wp-darwin-arm64"
-            else asset="wp-linux-arm64"
-            fi
-            ;;
+        case "${os}/${arch}" in
+          Linux/x86_64|Linux/amd64)   asset="wp-linux-x64";    tool_arch="x64" ;;
+          Linux/aarch64|Linux/arm64)  asset="wp-linux-arm64";  tool_arch="arm64" ;;
+          Darwin/x86_64)              asset="wp-darwin-x64";   tool_arch="x64" ;;
+          Darwin/arm64)               asset="wp-darwin-arm64"; tool_arch="arm64" ;;
           *)
-            echo "::error::unsupported runner arch '${arch}'"
+            echo "::error::unsupported runner platform '${os}/${arch}'"
             exit 3
             ;;
         esac
 
-        release_api="https://api.github.com/repos/webpresso/app/releases/tags/v${WP_VERSION}"
-        http_code="$(curl -sS -o /tmp/ak-release.json -w '%{http_code}' \
-          -H "Authorization: Bearer ${token}" \
-          -H "Accept: application/vnd.github+json" \
-          "${release_api}" || true)"
-        if [[ "${http_code}" != "200" ]]; then
-          echo "::error::cannot read agent-kit release v${WP_VERSION} (HTTP ${http_code})"
-          head -c 500 /tmp/ak-release.json || true
-          exit 6
-        fi
-
-        asset_url() {
-          local name="$1"
-          python3 -c "import json; assets=json.load(open('/tmp/ak-release.json')).get('assets',[]); print(next((a['url'] for a in assets if a.get('name')=='${name}'),''))"
-        }
-
-        bin_url="$(asset_url "${asset}")"
-        if [[ -z "${bin_url}" ]]; then
-          echo "::error::release v${WP_VERSION} has no asset ${asset}"
-          exit 7
+        # Cache short-circuit. Keyed on the tool-cache VERSION DIRECTORY only:
+        # `wp --version` reports the product axis from a package root the
+        # standalone binary does not have, so every release binary prints
+        # 0.0.0 and can never identify itself. The directory name is the only
+        # honest provenance signal, and it is what the runner image writes.
+        cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"
+        if [[ -x "${cache_root}/wp" ]]; then
+          echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
+          echo "${cache_root}" >> "${GITHUB_PATH}"
+          echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
+          exit 0
         fi
 
         install_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp"
-        package_root="${RUNNER_TEMP:-/tmp}/webpresso-agent-kit-package"
-        mkdir -p "${install_dir}" "${package_root}"
+        mkdir -p "${install_dir}"
 
-        echo "Downloading ${asset} from agent-kit v${WP_VERSION}"
-        curl -fsSL --retry 3 --retry-delay 2 \
-          -H "Authorization: Bearer ${token}" \
-          -H "Accept: application/octet-stream" \
-          -o "${install_dir}/wp" \
-          "${bin_url}"
+        # Public release asset: a plain redirecting download, no API and no
+        # token. -L is mandatory -- GitHub 302s release assets to a signed
+        # asset host, and without it curl reports the redirect as a failure.
+        url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${asset}"
+        echo "setup-wp: tool-cache miss; downloading ${url}"
+        if ! curl -fsSL --retry 3 --retry-delay 2 -o "${install_dir}/wp" "${url}"; then
+          echo "::error::download failed for ${url} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${asset}?"
+          exit 6
+        fi
         chmod +x "${install_dir}/wp"
 
-        pack_url="$(asset_url "agent-kit-package.tgz")"
-        if [[ -n "${pack_url}" ]]; then
-          echo "Downloading agent-kit-package.tgz from agent-kit v${WP_VERSION}"
-          curl -fsSL --retry 3 --retry-delay 2 \
-            -H "Authorization: Bearer ${token}" \
-            -H "Accept: application/octet-stream" \
-            -o /tmp/agent-kit-package.tgz \
-            "${pack_url}"
-          tar -xzf /tmp/agent-kit-package.tgz -C "${package_root}"
-          # npm pack nests as package/
-          if [[ -d "${package_root}/package" ]]; then
-            # flatten
-            shopt -s dotglob
-            mv "${package_root}/package"/* "${package_root}/"
-            rmdir "${package_root}/package"
-            shopt -u dotglob
-          fi
-        else
-          # Fallback for releases that predate agent-kit-package.tgz:
-          # tag source tree still ships src/ migrations + catalog.
-          echo "agent-kit-package.tgz missing; falling back to tag source archive"
-          archive_url="https://api.github.com/repos/webpresso/app/tarball/v${WP_VERSION}"
-          curl -fsSL --retry 3 --retry-delay 2 \
-            -H "Authorization: Bearer ${token}" \
-            -H "Accept: application/vnd.github+json" \
-            -o /tmp/agent-kit-src.tar.gz \
-            "${archive_url}"
-          mkdir -p /tmp/ak-src-extract
-          tar -xzf /tmp/agent-kit-src.tar.gz -C /tmp/ak-src-extract
-          src_dir="$(find /tmp/ak-src-extract -mindepth 1 -maxdepth 1 -type d | head -1)"
-          if [[ -z "${src_dir}" || ! -f "${src_dir}/package.json" ]]; then
-            echo "::error::failed to extract agent-kit source archive for v${WP_VERSION}"
-            exit 8
-          fi
-          # Copy package-root essentials (not full node_modules tree)
-          cp "${src_dir}/package.json" "${package_root}/package.json"
-          for dir in catalog src dist bin tsconfig; do
-            if [[ -d "${src_dir}/${dir}" ]]; then
-              cp -R "${src_dir}/${dir}" "${package_root}/${dir}"
-            fi
-          done
+        # A truncated or HTML body would still be "executable"; the real
+        # binaries are ~100MB, so anything tiny is a failed download.
+        size="$(wc -c < "${install_dir}/wp" | tr -d ' ')"
+        if [[ "${size}" -lt 1048576 ]]; then
+          echo "::error::downloaded ${asset} is only ${size} bytes; not a wp binary"
+          exit 4
         fi
 
-        if [[ ! -f "${package_root}/package.json" ]]; then
-          echo "::error::package root missing package.json at ${package_root}"
-          exit 9
+        if [[ -n "${WP_CHECKSUM}" ]]; then
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "${install_dir}/wp" | cut -d' ' -f1)"
+          else
+            actual="$(shasum -a 256 "${install_dir}/wp" | cut -d' ' -f1)"
+          fi
+          if [[ "${actual}" != "${WP_CHECKSUM}" ]]; then
+            echo "::error::sha256 mismatch for ${asset}: expected ${WP_CHECKSUM}, got ${actual}"
+            exit 5
+          fi
+          echo "setup-wp: sha256 verified"
         fi
+
+        # Populate the tool cache so a later job on the same runner (and any
+        # consumer probing the same path) short-circuits. Best effort: the
+        # cache root is root-owned on some images, and failing to seed it is
+        # not a reason to fail an otherwise successful install.
+        if mkdir -p "${cache_root}" 2>/dev/null &&
+           cp "${install_dir}/wp" "${cache_root}/wp.tmp" 2>/dev/null &&
+           mv "${cache_root}/wp.tmp" "${cache_root}/wp" 2>/dev/null; then
+          chmod +x "${cache_root}/wp" || true
+          touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
+          echo "setup-wp: seeded tool cache at ${cache_root}"
+        fi
+
+        echo "${install_dir}" >> "${GITHUB_PATH}"
+        echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
+        echo "setup-wp: installed wp ${WP_VERSION} (${asset}) to ${install_dir}"
+
+    - name: Install agent-kit package root
+      if: ${{ inputs.package-root == 'true' }}
+      shell: bash
+      env:
+        PACKAGE_ROOT_REPO: ${{ inputs.package-root-repo }}
+        PACKAGE_ROOT_REF: ${{ inputs.package-root-ref }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        # Opt-in legacy path. The public release repository ships the five wp
+        # binaries and nothing else -- no agent-kit-package.tgz and no source
+        # tree -- so a package root can only come from the private source
+        # monorepo, which is on its own version axis.
+        token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+        if [[ -z "${token}" ]]; then
+          echo "::error::package-root: true requires 'github-token' to read ${PACKAGE_ROOT_REPO}"
+          exit 11
+        fi
+
+        ref="${PACKAGE_ROOT_REF}"
+        if [[ -z "${ref}" ]]; then
+          echo "::error::package-root: true requires 'package-root-ref'; the public release line restarted at 0.0.1 and does not track ${PACKAGE_ROOT_REPO} tags"
+          exit 12
+        fi
+
+        package_root="${RUNNER_TEMP:-/tmp}/webpresso-agent-kit-package"
+        mkdir -p "${package_root}"
+
+        archive="${RUNNER_TEMP:-/tmp}/agent-kit-src.tar.gz"
+        curl -fsSL --retry 3 --retry-delay 2 \
+          -H "Authorization: Bearer ${token}" \
+          -H "Accept: application/vnd.github+json" \
+          -o "${archive}" \
+          "https://api.github.com/repos/${PACKAGE_ROOT_REPO}/tarball/${ref}"
+
+        extract_dir="${RUNNER_TEMP:-/tmp}/ak-src-extract"
+        mkdir -p "${extract_dir}"
+        tar -xzf "${archive}" -C "${extract_dir}"
+        src_dir="$(find "${extract_dir}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+        if [[ -z "${src_dir}" || ! -f "${src_dir}/package.json" ]]; then
+          echo "::error::failed to extract ${PACKAGE_ROOT_REPO} source archive for ${ref}"
+          exit 13
+        fi
+
+        cp "${src_dir}/package.json" "${package_root}/package.json"
+        for dir in catalog src dist bin tsconfig; do
+          if [[ -d "${src_dir}/${dir}" ]]; then
+            cp -R "${src_dir}/${dir}" "${package_root}/${dir}"
+          fi
+        done
 
         # Node module layout so createRequire(cwd).resolve('@webpresso/agent-kit/package.json')
-        # works for existing release binaries that predate WEBPRESSO_AGENT_KIT_ROOT.
+        # works for release binaries that predate WEBPRESSO_AGENT_KIT_ROOT.
         modules_root="${RUNNER_TEMP:-/tmp}/webpresso-node-modules"
         mkdir -p "${modules_root}/@webpresso"
         rm -rf "${modules_root}/@webpresso/agent-kit"
         ln -s "${package_root}" "${modules_root}/@webpresso/agent-kit"
 
-        echo "${install_dir}" >> "${GITHUB_PATH}"
         {
           echo "WEBPRESSO_AGENT_KIT_ROOT=${package_root}"
           echo "WP_AGENT_KIT_PACKAGE_ROOT=${package_root}"
           echo "NODE_PATH=${modules_root}${NODE_PATH:+:${NODE_PATH}}"
         } >> "${GITHUB_ENV}"
-        export PATH="${install_dir}:${PATH}"
-        export WEBPRESSO_AGENT_KIT_ROOT="${package_root}"
-        export NODE_PATH="${modules_root}${NODE_PATH:+:${NODE_PATH}}"
 
-        installed="$("${install_dir}/wp" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' | head -1 || true)"
-        if [[ -z "${installed}" ]]; then
-          echo "::error::wp binary failed to report a version"
-          exit 10
-        fi
-        echo "setup-wp: installed wp ${installed} (pin ${WP_VERSION}) package_root=${package_root}"
+        # Advisory only. Which assets a command needs is the command's
+        # business; failing the install here would break every caller that
+        # never touches blueprint migrations.
         if [[ ! -d "${package_root}/src/blueprint/db/migrations" && ! -d "${package_root}/dist/esm/blueprint/db/migrations" ]]; then
-          echo "::error::package root lacks blueprint migrations under src/ or dist/esm/"
-          exit 11
+          echo "::warning::package root from ${PACKAGE_ROOT_REPO}@${ref} lacks blueprint migrations under src/ or dist/esm/"
         fi
-        # Prove Node can resolve the package the same way findPackageAsset does.
-        node -e "const {createRequire}=require('module'); const r=createRequire(require('path').join(process.cwd(),'noop.cjs')); console.log(r.resolve('@webpresso/agent-kit/package.json'))"
+        echo "setup-wp: package root installed from ${PACKAGE_ROOT_REPO}@${ref} at ${package_root}"

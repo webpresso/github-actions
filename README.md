@@ -41,11 +41,17 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 - installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
-Agent-kit contract:
-- every reusable workflow invokes one immutable `setup-wp` action commit, hosted in this public repo so callers outside the `webpresso` GitHub org can resolve it (the equivalent action in the private `webpresso/agent-kit` repo cannot be shared across organizations)
-- `setup-wp` takes a required `version` input — the caller supplies the exact published `@webpresso/agent-kit` semver to install; the action does not self-resolve a version
-- `wp` is installed globally after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- consumers update their reusable-workflow commit SHA and, independently, the pinned `version` input when they want a newer agent-kit release
+wp install contract (`setup-wp`):
+- every reusable workflow invokes one immutable `setup-wp` action commit, hosted in this public repo so callers outside the `webpresso` GitHub org can resolve it (the equivalent action in the private source monorepo cannot be shared across organizations)
+- `setup-wp` takes a required `version` input — the caller supplies the exact wp release semver to install; the action does not self-resolve a version
+- the binary is downloaded from the **public** `webpresso/app-releases` repository by direct release-asset URL. There is no GitHub API call, no token, and no `python3` dependency on the runner; `github-token` is still accepted (so existing callers keep working) but no longer takes part in the install
+- the release line restarted at `0.0.1` when the private `webpresso/agent-kit` repository was renamed to `webpresso/app`, and `v0.0.2` is a byte-identical mirror of the last private `3.3.6` build. A caller still on the old `3.3.x` axis must move the `version` input onto the new line in the same commit that bumps the pinned `setup-wp` SHA — the two pins are only valid together
+- before downloading, the action short-circuits on the `@actions/tool-cache` layout: if `${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/<version>/<arch>/wp` is executable it goes straight onto `PATH`. Self-hosted images that bake wp in therefore never hit the network; GitHub-hosted runners miss and fall through to the download, which then seeds that same path best-effort
+- the cache is keyed on the version **directory**, never on `wp --version`: a standalone release binary reports the product axis from a package root it does not carry, so every published binary prints `0.0.0`. Nothing in a workflow may assert that `wp --version` equals the pinned version
+- an optional `checksum` input pins the sha256 of the downloaded asset for callers that want the binary bound as tightly as the action SHAs
+- `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
+- the agent-kit package root (`WEBPRESSO_AGENT_KIT_ROOT`, `WP_AGENT_KIT_PACKAGE_ROOT`, `NODE_PATH`) is **opt-in** via `package-root: true` and is off by default: the public release repository ships only the five `wp-*` binaries, and current binaries resolve their own catalog and migration assets. The opt-in path reads the private source monorepo, so it additionally needs `github-token` and an explicit `package-root-ref` (the private tag axis, e.g. `v3.3.6`, does not track the public `version`). A package root that lacks blueprint migrations now warns instead of failing the install
+- consumers update their reusable-workflow commit SHA and, independently, the pinned `version` input when they want a newer wp release
 
 Security contract:
 - reusable deployment workflows use repo-owned secret profiles and require a
@@ -106,6 +112,14 @@ the signal that the pin shape drifted and the scan needs fixing, not a
 It runs entirely on the caller's own `GITHUB_TOKEN` (no PAT, no GitHub App) and
 never runs `wp setup`. It does not touch `setup-wp`'s exact-version install
 contract described above.
+
+⚠️ This workflow still resolves "latest" from the **npm** `@webpresso/agent-kit`
+version, which is no longer the axis `setup-wp` installs from: the binary now
+comes from the `webpresso/app-releases` release line that restarted at `0.0.1`.
+Until that resolver is repointed at the release line, do not schedule this
+workflow against a repository whose `setup-wp` `version:` input is on the new
+axis — it would "bump" a valid `0.0.x` pin to an npm version that has no
+published binary.
 
 This is a **caller-scheduled reusable workflow**: it declares only
 `workflow_call` and `workflow_dispatch`, so it has no `schedule:` trigger of its
