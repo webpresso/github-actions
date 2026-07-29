@@ -40,7 +40,21 @@ on:
         value: ${{ jobs.release.outputs.package_name }}
     secrets:
       CI_AGENT_KIT_TOKEN:
-        description: Token to read private agent-kit GitHub release assets
+        # DEPRECATED and no longer used. setup-wp now installs wp from the
+        # PUBLIC webpresso/app-releases repo, so the binary needs no credential.
+        # It is still declared because removing a secret from a reusable
+        # workflow is a breaking change for any caller that still passes it --
+        # GitHub rejects an undeclared secret outright. Drop it once no caller
+        # passes it.
+        #
+        # NOTE for callers running catalog-dependent wp commands (`wp audit`,
+        # `wp sync`, `wp setup`): the new action installs a bare binary and does
+        # NOT export WEBPRESSO_AGENT_KIT_ROOT unless you pass `package-root:
+        # true` (which does need a token, plus package-root-ref). Those command
+        # strings are caller-supplied, so this repo cannot check them for you.
+        description: >-
+          Deprecated; unused. Kept for caller compatibility. See package-root on
+          the setup-wp action if you need the agent-kit catalog assets.
         required: false
 
 
@@ -69,10 +83,9 @@ jobs:
         with:
           package-manager-cache: "false"
 
-      - uses: webpresso/github-actions/.github/actions/setup-wp@f02cd8018ca8885d5245e0d2e43ad4a6d2f105b2
+      - uses: webpresso/github-actions/.github/actions/setup-wp@a52051119fb868cc1f7ebb2fcdaba769ff116475
         with:
-          version: "3.3.6"
-          github-token: ${{ secrets.CI_AGENT_KIT_TOKEN || github.token }}
+          version: "0.0.2"
 
       - name: Install caller dependencies
         shell: bash
