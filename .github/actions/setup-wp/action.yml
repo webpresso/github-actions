@@ -178,6 +178,29 @@ runs:
           exit 12
         fi
 
+        # The package root ships CODE but no node_modules, and some wp surfaces
+        # need a real runtime dependency rather than only bundled source: `wp
+        # audit package-surface --full` resolves `secretlint` out of the package
+        # root and fails closed when it is absent. Installing wp from npm used
+        # to provide that tree implicitly; the binary + package-root model does
+        # not, so consumer repos lost audits that used to pass (webpresso/
+        # framework #90: "secretlint is unavailable for package-surface audit").
+        #
+        # Restore the dependency tree the npm install model gave for free.
+        # --omit=dev because only runtime deps are declared as needed;
+        # --ignore-scripts because a CI consumer must never execute a
+        # dependency's lifecycle script; failure is a warning, not fatal —
+        # every wp surface that does NOT need a runtime dep must keep working
+        # on a network-flaky runner exactly as it does today.
+        if [[ -f "${package_root}/package.json" ]]; then
+          if npm install --omit=dev --ignore-scripts --no-audit --no-fund \
+              --prefix "${package_root}" >/dev/null 2>&1; then
+            echo "package root: runtime dependencies installed"
+          else
+            echo "::warning::package-root runtime dependency install failed; wp surfaces needing a runtime dep (e.g. audit package-surface --full) will fail closed."
+          fi
+        fi
+
         # Node module layout so createRequire(cwd).resolve() keeps working for
         # binaries that predate WEBPRESSO_AGENT_KIT_ROOT.
         modules_root="${RUNNER_TEMP:-/tmp}/webpresso-node-modules"
