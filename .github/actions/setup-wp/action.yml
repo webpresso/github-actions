@@ -209,8 +209,11 @@ runs:
         ln -s "${package_root}" "${modules_root}/@webpresso/agent-kit"
 
         {
+          # Current name. wp reads this and nothing else.
+          echo "WEBPRESSO_PACKAGE_ROOT=${package_root}"
+          # Retired spelling, exported ONLY for wp binaries already published
+          # against it (<= 0.0.4). Delete once no supported release reads it.
           echo "WEBPRESSO_AGENT_KIT_ROOT=${package_root}"
-          echo "WP_AGENT_KIT_PACKAGE_ROOT=${package_root}"
           echo "NODE_PATH=${modules_root}${NODE_PATH:+:${NODE_PATH}}"
         } >> "${GITHUB_ENV}"
         echo "package root: ${WP_RELEASE_REPO} v${WP_VERSION} (public, tokenless)"
