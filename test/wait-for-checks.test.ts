@@ -75,6 +75,7 @@ type HelperResult = {
   readonly status: number | null;
   readonly output: string;
   readonly summary: string;
+  readonly stepOutput: string;
   readonly elapsedMs: number;
   readonly pollCount: number;
 };
@@ -139,10 +140,12 @@ function runHelper(options: HelperOptions): HelperResult {
   const scriptPath = join(directory, "wait.cjs");
   const preloadPath = join(directory, "mock-fetch.cjs");
   const summaryPath = join(directory, "summary.md");
+  const stepOutputPath = join(directory, "step-output.txt");
   const pollLogPath = join(directory, "polls.log");
   writeFileSync(scriptPath, helperSource);
   writeFileSync(preloadPath, mockFetchSource(options, pollLogPath));
   writeFileSync(summaryPath, "");
+  writeFileSync(stepOutputPath, "");
   writeFileSync(pollLogPath, "");
 
   const startedAt = Date.now();
@@ -152,6 +155,7 @@ function runHelper(options: HelperOptions): HelperResult {
       PATH: process.env["PATH"] ?? "",
       GITHUB_API_URL: "https://api.github.test",
       GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_OUTPUT: stepOutputPath,
       WAIT_CONTEXTS: options.contexts,
       WAIT_REF: "cafe1234",
       WAIT_REPOSITORY: "webpresso/repo",
@@ -166,6 +170,7 @@ function runHelper(options: HelperOptions): HelperResult {
     status: result.status,
     output: `${result.stdout}${result.stderr}`,
     summary: readFileSync(summaryPath, "utf8"),
+    stepOutput: readFileSync(stepOutputPath, "utf8"),
     elapsedMs: Date.now() - startedAt,
     pollCount: readFileSync(pollLogPath, "utf8").split("\n").filter(Boolean).length,
   };
@@ -221,6 +226,36 @@ describe("wait-for-checks success", () => {
     });
     expect(result.summary).toInclude("- `quality`: SUCCESS");
     expect(result.summary).toInclude("- `e2e`: SUCCESS");
+  });
+
+  // Each step gets its OWN GITHUB_STEP_SUMMARY file, so a later step cannot
+  // read the wait's summary. The `states` output is the only thing a caller
+  // can assert on, and it must therefore be set on the failure paths too.
+  it("writes a machine-readable states output on success", () => {
+    const result = runHelper({
+      contexts: "quality,e2e",
+      polls: [[checkRun({ name: "quality" }), checkRun({ name: "e2e" })]],
+    });
+    expect(result.stepOutput).toBe("states=quality=SUCCESS,e2e=SUCCESS\n");
+  });
+
+  it("writes the states output on the timeout path too", () => {
+    const result = runHelper({
+      contexts: "slow-check,typo-check",
+      polls: [[checkRun({ name: "slow-check", status: "queued", conclusion: null })]],
+      timeoutSeconds: "0.3",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stepOutput).toBe("states=slow-check=PENDING,typo-check=NEVER OBSERVED\n");
+  });
+
+  it("writes the states output on the terminal-failure path too", () => {
+    const result = runHelper({
+      contexts: "wp-check",
+      polls: [[checkRun({ name: "wp-check", conclusion: "failure" })]],
+    });
+    expect(result.status).toBe(1);
+    expect(result.stepOutput).toBe("states=wp-check=FAILED\n");
   });
 });
 
@@ -483,12 +518,17 @@ describe("wait-for-checks action shape", () => {
 
   it("declares the documented inputs and defaults", () => {
     expect(dig(action, "inputs", "contexts", "required")).toBe(true);
-    expect(dig(action, "inputs", "ref", "default")).toBe("${{ github.sha }}");
+    // NOT a bare `github.sha`: on a pull_request event that is the ephemeral
+    // merge commit, which carries zero check runs — verified live, and caught
+    // by this repo's own gate before the action shipped.
+    expect(dig(action, "inputs", "ref", "default")).toBe("${{ github.event.pull_request.head.sha || github.sha }}");
     expect(dig(action, "inputs", "repository", "default")).toBe("${{ github.repository }}");
     expect(dig(action, "inputs", "timeout-seconds", "default")).toBe("900");
     expect(dig(action, "inputs", "poll-interval-seconds", "default")).toBe("20");
     expect(dig(action, "inputs", "token", "default")).toBe("${{ github.token }}");
     expect(dig(action, "inputs", "workflow", "default")).toBe("");
+    expect(dig(action, "outputs", "states", "value")).toBe("${{ steps.wait.outputs.states }}");
+    expect(actionSteps[0]?.["id"], "the states output must be wired to a real step id").toBe("wait");
   });
 
   it("passes every caller-controlled value through env, never into the script body", () => {
@@ -562,6 +602,12 @@ describe("self-test.yml exercises the action against the live API", () => {
     const body = typeof assertion?.["run"] === "string" ? assertion["run"] : "";
     expect(body).toInclude("NEVER OBSERVED");
     expect(body).toInclude("failure");
+
+    // It must read the wait's `states` OUTPUT. Reading GITHUB_STEP_SUMMARY
+    // instead is vacuous — every step gets its own summary file — and that
+    // mistake shipped once already.
+    expect(dig(assertion, "env", "STATES")).toBe("${{ steps.bounded.outputs.states }}");
+    expect(body).not.toInclude("GITHUB_STEP_SUMMARY");
   });
 
   it("keeps the action referenced from this repo by path, so the gate tests the working tree", () => {

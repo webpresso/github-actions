@@ -15,9 +15,16 @@ inputs:
       none) -- not the workflow name.
     required: true
   ref:
-    description: Commit SHA whose check runs are inspected.
+    description: >
+      Commit SHA whose check runs are inspected. The default is the PR head SHA
+      on a pull_request event and github.sha everywhere else -- deliberately
+      NOT a bare github.sha: on a pull_request event github.sha is the ephemeral
+      MERGE commit, which carries zero check runs, so a bare default would make
+      every PR-triggered wait fail as NEVER OBSERVED. Verified against the live
+      API: the merge commit reports total_count 0 while the head commit carries
+      the whole suite.
     required: false
-    default: ${{ github.sha }}
+    default: ${{ github.event.pull_request.head.sha || github.sha }}
   repository:
     description: owner/repo that owns the commit.
     required: false
@@ -47,10 +54,22 @@ inputs:
     required: false
     default: ""
 
+outputs:
+  states:
+    description: >
+      Final per-context state as `name=STATE` pairs, comma separated (STATE is
+      SUCCESS, PENDING, NEVER OBSERVED, FAILED, or CONFLICT). Set on success and
+      on failure, so a caller using `continue-on-error` can inspect WHY the wait
+      ended. The step summary carries the same information for humans -- but a
+      later step cannot read it, because the runner gives every step its own
+      GITHUB_STEP_SUMMARY file.
+    value: ${{ steps.wait.outputs.states }}
+
 runs:
   using: composite
   steps:
     - name: Wait for named check runs
+      id: wait
       shell: bash
       env:
         # Nothing is interpolated into the shell or the JavaScript body: every
@@ -91,6 +110,7 @@ runs:
         const TOKEN = process.env.WAIT_TOKEN || "";
         const WORKFLOW = (process.env.WAIT_WORKFLOW || "").trim();
         const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY || "";
+        const OUTPUT_PATH = process.env.GITHUB_OUTPUT || "";
 
         /**
          * Every conclusion below fails this gate. `skipped` is in the list on
@@ -323,10 +343,21 @@ runs:
           });
         }
 
-        function recordSummary(results) {
+        /**
+         * Called exactly once, on whichever path the wait ends. Writes the
+         * human-readable step summary AND the machine-readable `states` output:
+         * a later step cannot read this step's summary (each step gets its own
+         * GITHUB_STEP_SUMMARY file), so the output is the only way a caller can
+         * assert on the outcome.
+         */
+        function recordOutcome(results) {
           summaryLines.push(`### wait-for-checks: ${REPOSITORY}@${REF}`);
           for (const [context, result] of results) {
             summaryLines.push(`- \`${context}\`: ${result.state}`);
+          }
+          if (OUTPUT_PATH.length > 0) {
+            const states = results.map(([context, result]) => `${context}=${result.state}`).join(",");
+            fs.appendFileSync(OUTPUT_PATH, `states=${states}\n`);
           }
         }
 
@@ -415,17 +446,17 @@ runs:
               // so polling on to the bound would only delay the same failure.
               for (const [context, result] of results) {
                 if (result.state === "CONFLICT") {
-                  recordSummary(results);
+                  recordOutcome(results);
                   failConflict(context, result);
                 }
                 if (result.state === "FAILED") {
-                  recordSummary(results);
+                  recordOutcome(results);
                   failTerminal(context, result);
                 }
               }
 
               if (results.every(([, result]) => result.state === STATE_SUCCESS)) {
-                recordSummary(results);
+                recordOutcome(results);
                 writeSummary();
                 note(`wait-for-checks: all ${results.length} context(s) succeeded on ${REPOSITORY}@${REF}`);
                 return;
@@ -440,7 +471,7 @@ runs:
 
             const remaining = deadline - Date.now();
             if (remaining <= 0) {
-              recordSummary(results);
+              recordOutcome(results);
               failTimeout(results, Math.round((Date.now() - startedAt) / 1000));
             }
             await sleep(Math.min(POLL_MS, remaining));

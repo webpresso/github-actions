@@ -76,6 +76,16 @@ The calling job must grant `permissions: { checks: read }` — plus
 `actions: read` when `workflow` is set, because attributing a check run to its
 workflow requires reading the owning workflow run.
 
+`ref` defaults to `${{ github.event.pull_request.head.sha || github.sha }}`,
+**not** a bare `github.sha`: on a `pull_request` event `github.sha` is the
+ephemeral merge commit, which carries **zero** check runs (verified against the
+live API — the merge commit reports `total_count: 0` while the PR head carries
+the whole suite), so a bare default would make every PR-triggered wait fail as
+`NEVER OBSERVED`. The action also exposes a `states` output (`name=STATE` pairs)
+so a caller using `continue-on-error` can inspect why the wait ended; a later
+step cannot read the wait's step summary, because the runner gives every step
+its own `GITHUB_STEP_SUMMARY` file.
+
 Three decisions are load-bearing:
 
 - **Only `success` passes, and `skipped` is a failure.** GitHub's branch

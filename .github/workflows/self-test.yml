@@ -92,6 +92,11 @@ jobs:
         shell: bash
         env:
           OUTCOME: ${{ steps.bounded.outcome }}
+          # The `states` output, not the step summary: the runner gives every
+          # step its own GITHUB_STEP_SUMMARY file, so a later step reading that
+          # variable would read an empty file and the assertion would be
+          # vacuous. (It was, until CI caught it.)
+          STATES: ${{ steps.bounded.outputs.states }}
         run: |
           set -euo pipefail
           elapsed=$(( $(date +%s) - WAIT_START ))
@@ -110,9 +115,9 @@ jobs:
 
           # A never-observed context and a pending one imply different fixes, so
           # the failure must not conflate them.
-          if ! grep -q "NEVER OBSERVED" "${GITHUB_STEP_SUMMARY}"; then
-            echo "::error::the failure must report NEVER OBSERVED for a context that produced no check run"
+          if [[ "${STATES}" != "this-context-does-not-exist=NEVER OBSERVED" ]]; then
+            echo "::error::expected a NEVER OBSERVED state for a context that produced no check run, got '${STATES}'"
             exit 1
           fi
 
-          echo "bounded wait failed in ${elapsed}s and reported NEVER OBSERVED"
+          echo "bounded wait failed in ${elapsed}s and reported: ${STATES}"
