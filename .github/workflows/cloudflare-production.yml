@@ -101,9 +101,6 @@ jobs:
       contents: read
       packages: read
       id-token: write
-      # A called workflow cannot elevate the caller token. This is effective
-      # only when a caller explicitly grants issues: write.
-      issues: write
       # A job-level `permissions:` block REPLACES the default token scopes
       # rather than merging with them, so `checks: read` has to be listed here
       # alongside every grant this job already needed -- adding it is not
