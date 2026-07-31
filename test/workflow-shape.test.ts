@@ -20,7 +20,7 @@ import {
   SETUP_TOOLCHAIN_USES,
   SETUP_WP_USES,
   SETUP_WP_VERSION,
-  WORKFLOW_AGENT_KIT_FRESHNESS,
+  WORKFLOW_WEBPRESSO_FRESHNESS,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -484,9 +484,9 @@ describe("repo-wide pin and prose contracts", () => {
 });
 
 describe("toolchain exceptions", () => {
-  it("agent-kit-freshness.yml is a deliberate toolchain exception", () => {
-    expect(Bun.file(WORKFLOW_AGENT_KIT_FRESHNESS).size, `expected ${WORKFLOW_AGENT_KIT_FRESHNESS} to exist`).toBeGreaterThan(0);
-    const workflow = loadYaml(WORKFLOW_AGENT_KIT_FRESHNESS);
+  it("webpresso-freshness.yml is a deliberate toolchain exception", () => {
+    expect(Bun.file(WORKFLOW_WEBPRESSO_FRESHNESS).size, `expected ${WORKFLOW_WEBPRESSO_FRESHNESS} to exist`).toBeGreaterThan(0);
+    const workflow = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
     const on = onSection(workflow);
     expect(Object.keys(on), "must be callable as a reusable workflow").toContain("workflow_call");
     expect(Object.keys(on), "must be manually exercisable without waiting for a schedule").toContain(
@@ -509,8 +509,8 @@ describe("toolchain exceptions", () => {
   // set so prose and YAML cannot drift into claiming a `schedule:` that does
   // not exist here (adding one would run the scan against this library instead
   // of the consumer).
-  it("agent-kit-freshness.yml declares exactly workflow_call and workflow_dispatch, never a schedule", () => {
-    const on = onSection(loadYaml(WORKFLOW_AGENT_KIT_FRESHNESS));
+  it("webpresso-freshness.yml declares exactly workflow_call and workflow_dispatch, never a schedule", () => {
+    const on = onSection(loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS));
     expect(Object.keys(on).sort()).toStrictEqual(["workflow_call", "workflow_dispatch"]);
     expect(readRepoFile(README_PATH)).toInclude("caller-scheduled reusable workflow");
   });

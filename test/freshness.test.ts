@@ -1,5 +1,5 @@
 /**
- * Behavioral contracts for `agent-kit-freshness.yml`: the embedded scan script
+ * Behavioral contracts for `webpresso-freshness.yml`: the embedded scan script
  * is extracted from its heredoc and executed under `node` against real git
  * fixture repositories, which is what the Actions runner does.
  *
@@ -11,7 +11,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   FULL_SHA_USES_RE,
-  WORKFLOW_AGENT_KIT_FRESHNESS,
+  WORKFLOW_WEBPRESSO_FRESHNESS,
   YAML_USES_LINE_RE,
   extractHeredocs,
   initFixtureRepo,
@@ -21,12 +21,12 @@ import {
   stripHeredocs,
 } from "./helpers.ts";
 
-const workflow = readRepoFile(WORKFLOW_AGENT_KIT_FRESHNESS);
+const workflow = readRepoFile(WORKFLOW_WEBPRESSO_FRESHNESS);
 
 /** The scan/bump script is the first NODE heredoc in the workflow. */
 function extractScanScript(): string {
   const scripts = extractHeredocs(workflow);
-  expect(scripts.length, "expected at least one embedded NODE heredoc in agent-kit-freshness.yml").toBeGreaterThan(0);
+  expect(scripts.length, "expected at least one embedded NODE heredoc in webpresso-freshness.yml").toBeGreaterThan(0);
   return scripts[0]?.body ?? "";
 }
 
@@ -40,7 +40,7 @@ function readOutput(path: string): string {
   return readFileSync(path, "utf8");
 }
 
-describe("agent-kit-freshness.yml shape", () => {
+describe("webpresso-freshness.yml shape", () => {
   it("declares workflow_call and workflow_dispatch triggers with least-privilege permissions", () => {
     expect(workflow).toMatch(/on:\n\s+workflow_call: \{\}\n\s+workflow_dispatch: \{\}/u);
     expect(workflow).toMatch(/permissions:\n\s+contents: write\n\s+pull-requests: write/u);
@@ -133,9 +133,11 @@ describe("embedded scan script behavior", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it("matches all four documented pin shapes and bumps them to latest, leaving unrelated version: keys untouched", () => {
+  it("matches all three documented npm pin shapes and bumps them to latest, leaving setup-wp and unrelated version: keys untouched", () => {
     const dir = initFixtureRepo({
-      // Shape 1 (env assignment) + shape 2 (shell default) + shape 3 (setup-wp).
+      // Shape 1 (env assignment) + shape 2 (shell default). The setup-wp step
+      // below is deliberately present and must NOT be bumped: its version is on
+      // the app-releases axis, not the npm axis this workflow resolves.
       ".github/workflows/ci.yml": [
         "name: ci",
         "on: [push]",
@@ -156,7 +158,7 @@ describe("embedded scan script behavior", () => {
         "          release_version: 3.1.17",
         "",
       ].join("\n"),
-      // Shape 4 (composite input default).
+      // Shape 3 (composite input default).
       ".github/actions/setup-ci-workspace/action.yml": [
         "name: setup-ci-workspace",
         "inputs:",
@@ -180,13 +182,17 @@ describe("embedded scan script behavior", () => {
 
     const output = readOutput(githubOutput);
     expect(output).toMatch(/changed=true/u);
-    expect(output).toMatch(/pins_found=4/u);
-    expect(output).toMatch(/pins_bumped=4/u);
+    expect(output).toMatch(/pins_found=3/u);
+    expect(output).toMatch(/pins_bumped=3/u);
 
     const ci = readOutput(join(dir, ".github/workflows/ci.yml"));
     expect(ci).toMatch(/AGENT_KIT_VERSION=3\.1\.30/u);
     expect(ci).toMatch(/WP_SETUP_AGENT_KIT_VERSION:-3\.1\.30/u);
-    expect(ci).toMatch(/version: "3\.1\.30"/u);
+    // The setup-wp version is on the app-releases axis and must survive
+    // untouched. Rewriting it to an npm-axis value produced a tag that does
+    // not exist, so setup-wp 404s and every "freshened" consumer breaks.
+    expect(ci).toMatch(/version: "3\.1\.17"/u);
+    expect(ci).not.toMatch(/version: "3\.1\.30"/u);
     expect(ci).toMatch(/version: \$\{\{ steps\.pnpm\.outputs\.version \}\}/u);
     expect(ci).toMatch(/release_version: 3\.1\.17/u);
 
@@ -198,7 +204,12 @@ describe("embedded scan script behavior", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("bumps setup-wp with: version (shape 3) in isolation", () => {
+  it("never rewrites a setup-wp with: version -- it is a different version axis", () => {
+    // Regression guard. This workflow resolves LATEST from the npm package
+    // @webpresso/agent-kit (3.x). The setup-wp action resolves its `version`
+    // input against webpresso/app-releases (0.0.x). Bumping the latter with the
+    // former writes a release tag that does not exist, so setup-wp fails the
+    // download and breaks every consumer the bot touched.
     const dir = initFixtureRepo({
       ".github/workflows/ci.yml": [
         "name: ci",
@@ -208,25 +219,25 @@ describe("embedded scan script behavior", () => {
         "    steps:",
         "      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88",
         "        with:",
-        '          version: "3.1.17"',
+        '          version: "0.0.5"',
         "",
       ].join("\n"),
     });
 
-    const { result, githubOutput } = runScanScript({
+    const { result } = runScanScript({
       latest: "3.1.30",
       cwd: dir,
       scriptSource: extractScanScript(),
     });
-    expect(result.status, result.stderr).toBe(0);
-    const output = readOutput(githubOutput);
-    expect(output).toMatch(/pins_found=1/u);
-    expect(output).toMatch(/pins_bumped=1/u);
-    expect(output).toMatch(/changed=true/u);
+
+    // A repo whose only version-shaped pin is setup-wp has nothing on the npm
+    // axis to freshen, so the scan reports no pins rather than inventing work.
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/No @webpresso\/agent-kit version pins found/u);
 
     const ci = readOutput(join(dir, ".github/workflows/ci.yml"));
-    expect(ci).toMatch(/version: "3\.1\.30"/u);
-    expect(ci).not.toMatch(/version: "3\.1\.17"/u);
+    expect(ci).toMatch(/version: "0\.0\.5"/u);
+    expect(ci).not.toMatch(/3\.1\.30/u);
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -239,9 +250,7 @@ describe("embedded scan script behavior", () => {
         "jobs:",
         "  build:",
         "    steps:",
-        "      - uses: webpresso/github-actions/.github/actions/setup-wp@c2c71a7a4be446fc6858e6b57bf55a11ccfa2d88",
-        "        with:",
-        '          version: "3.1.30"',
+        '      - run: echo "AGENT_KIT_VERSION=3.1.30" >> "$GITHUB_ENV"',
         "",
       ].join("\n"),
     });
