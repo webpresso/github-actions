@@ -47,7 +47,7 @@ jobs:
 
       - uses: webpresso/github-actions/.github/actions/setup-wp@a52051119fb868cc1f7ebb2fcdaba769ff116475
         with:
-          version: "0.0.2"
+          version: "0.0.5"
 
       - name: Install caller dependencies
         shell: bash
