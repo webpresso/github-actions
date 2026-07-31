@@ -36,3 +36,88 @@ jobs:
       # under node against real git fixtures.
       - name: Contract tests
         run: bun test
+
+  # The contract suite proves the wait-for-checks polling program against a
+  # mocked API. These two jobs prove the composite against the REAL check-runs
+  # API on this very commit: one commit, one green check, one name that cannot
+  # exist. They are the only part of the action's behaviour a mock cannot
+  # establish -- that the endpoint, the default token scope, and the check-run
+  # naming are what the program assumes.
+  #
+  # `uses: ./…` needs a checkout because the action lives in the repo under
+  # test; consumers reference it as
+  # `webpresso/github-actions/.github/actions/wait-for-checks@<sha>` and need no
+  # checkout at all, which is the point of the action being checkout-free.
+  wait-for-checks-success:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      # `contract-tests` is completed and green by the time this job starts, so
+      # the wait must observe a real success and return promptly.
+      - uses: ./.github/actions/wait-for-checks
+        with:
+          contexts: contract-tests
+          timeout-seconds: 120
+          poll-interval-seconds: 5
+
+  wait-for-checks-bounded-failure:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Record start time
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "WAIT_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - id: bounded
+        continue-on-error: true
+        uses: ./.github/actions/wait-for-checks
+        with:
+          contexts: this-context-does-not-exist
+          timeout-seconds: 30
+          poll-interval-seconds: 5
+
+      - name: Assert the wait failed inside its bound and said why
+        id: assert
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.bounded.outcome }}
+          # The `states` output, not the step summary: the runner gives every
+          # step its own GITHUB_STEP_SUMMARY file, so a later step reading that
+          # variable would read an empty file and the assertion would be
+          # vacuous. (It was, until CI caught it.)
+          STATES: ${{ steps.bounded.outputs.states }}
+        run: |
+          set -euo pipefail
+          elapsed=$(( $(date +%s) - WAIT_START ))
+
+          if [[ "${OUTCOME}" != "failure" ]]; then
+            echo "::error::expected the bounded wait to fail, got '${OUTCOME}'"
+            exit 1
+          fi
+
+          # Bounded: a 30s wait that ran for minutes would mean the deadline is
+          # not enforced, which is the whole contract.
+          if (( elapsed > 90 )); then
+            echo "::error::the 30s bounded wait took ${elapsed}s"
+            exit 1
+          fi
+
+          # A never-observed context and a pending one imply different fixes, so
+          # the failure must not conflate them.
+          if [[ "${STATES}" != "this-context-does-not-exist=NEVER OBSERVED" ]]; then
+            echo "::error::expected a NEVER OBSERVED state for a context that produced no check run, got '${STATES}'"
+            exit 1
+          fi
+
+          echo "bounded wait failed in ${elapsed}s and reported: ${STATES}"
