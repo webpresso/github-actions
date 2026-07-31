@@ -109,7 +109,11 @@ describe("require_checks gate placement", () => {
     // merging, so this asserts the whole expected set, not just the addition.
     const expected: ReadonlyArray<readonly [string, string, readonly string[]]> = [
       [WORKFLOW_PREVIEW, "preview", ["contents", "packages", "id-token", "checks"]],
-      [WORKFLOW_PRODUCTION, "production", ["contents", "packages", "id-token", "issues", "checks"]],
+      // No `issues` scope: a called workflow cannot elevate the caller token, so
+      // requesting a scope the caller does not grant fails the ENTIRE caller
+      // workflow at startup (startup_failure, jobs=0). It was requested here but
+      // never used, and it silently blocked every fleet release from 2026-07-28.
+      [WORKFLOW_PRODUCTION, "production", ["contents", "packages", "id-token", "checks"]],
       [WORKFLOW_RELEASE, "release", ["contents", "pull-requests", "packages", "checks"]],
     ];
 

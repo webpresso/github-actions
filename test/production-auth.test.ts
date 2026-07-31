@@ -14,9 +14,14 @@ describe("cloudflare-production.yml GitHub auth", () => {
     expect(workflow).toMatch(
       /deploy_github_token:\n\s+description:[^\n]+\n\s+required: false\n\s+default: false\n\s+type: boolean/u,
     );
+    // Deliberately does NOT assert `issues: write`: a called workflow cannot
+    // elevate the caller token, so requesting a scope the caller does not grant
+    // fails the ENTIRE caller workflow at startup. It was requested but never
+    // used, and it silently blocked every fleet release from 2026-07-28.
     expect(workflow).toMatch(
-      /permissions:\n\s+contents: read\n\s+packages: read\n\s+id-token: write[\s\S]*?issues: write/u,
+      /permissions:\n\s+contents: read\n\s+packages: read\n\s+id-token: write/u,
     );
+    expect(workflow).not.toMatch(/issues: write/u);
 
     const deployStep = workflow.match(
       /- name: Run caller deploy block through the secret sink[\s\S]*?(?=\n\s+- name:)/u,
