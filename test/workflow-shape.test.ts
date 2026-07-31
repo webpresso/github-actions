@@ -21,7 +21,6 @@ import {
   SETUP_WP_USES,
   SETUP_WP_VERSION,
   WORKFLOW_AGENT_KIT_FRESHNESS,
-  WORKFLOW_CI,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -392,7 +391,7 @@ describe("pin consistency", () => {
   // derived from the canonical workflow at runtime and what is asserted is
   // cross-site agreement plus value shape.
   it("derives the canonical pins from a single workflow and they are correctly shaped", () => {
-    expect(CANONICAL_PIN_WORKFLOW).toBe(WORKFLOW_CI);
+    expect(CANONICAL_PIN_WORKFLOW).toBe(WORKFLOW_PRODUCTION);
     expect(SETUP_TOOLCHAIN_USES).toMatch(FULL_SHA_USES_RE);
     expect(SETUP_TOOLCHAIN_USES).toStartWith(
       "webpresso/github-actions/.github/actions/setup-webpresso-toolchain@",
@@ -459,17 +458,14 @@ describe("repo-wide pin and prose contracts", () => {
     expect(readme).not.toInclude("cli-global-packages");
   });
 
-  it("the shared CI workflow uses the shared toolchain and an aggregate gate", () => {
-    const workflow = loadYaml(WORKFLOW_CI);
-    const inputs = workflowCallInputs(workflow);
-    expect(dig(inputs, "install_command", "type")).toBe("string");
-    expect(dig(inputs, "quality_command", "type")).toBe("string");
-    expect(dig(inputs, "e2e_command", "default")).toBe("");
-    expect(dig(inputs, "architecture_command", "default")).toBe("");
-    expect(dig(inputs, "deploy_verify_command", "default")).toBe("");
-    expect(stepUses(WORKFLOW_CI)).toContain(SETUP_TOOLCHAIN_USES);
-    expect(dig(workflow, "jobs", "ci", "needs")).toStrictEqual(["quality", "e2e", "architecture", "deploy-verify"]);
-    expect(dig(workflow, "jobs", "ci", "name")).toBe("ci");
+  // webpresso-ci.yml was removed: an org-wide code search found zero `uses:`
+  // consumers (the one repo that wanted its pattern hand-rolled it locally),
+  // and an unused reusable workflow is a maintained pin surface that pays for
+  // nothing. This asserts the removal instead of leaving a silent hole, since
+  // the file was also the suite's canonical pin anchor.
+  it("the unconsumed shared CI workflow stays removed", () => {
+    expect(workflowPaths().map((path) => path.split("/").pop())).not.toContain("webpresso-ci.yml");
+    expect(readRepoFile(README_PATH)).not.toInclude("webpresso-ci.yml");
   });
 
   it("the shared security workflow uses pinned scanners and the shared toolchain", () => {
