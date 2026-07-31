@@ -10,6 +10,7 @@ Current workflows:
 - `.github/workflows/changesets-release.yml`
 - `.github/workflows/agent-kit-freshness.yml`
 - `.github/actions/setup-webpresso-toolchain/action.yml`
+- `.github/actions/wait-for-checks/action.yml`
 
 Consumers should pin reusable workflow references by full commit SHA.
 
@@ -52,6 +53,51 @@ wp install contract (`setup-wp`):
 - `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
 - the agent-kit package root (`WEBPRESSO_AGENT_KIT_ROOT`, `WP_AGENT_KIT_PACKAGE_ROOT`, `NODE_PATH`) is **opt-in** via `package-root: true` and is off by default: the public release repository ships only the five `wp-*` binaries, and current binaries resolve their own catalog and migration assets. The opt-in path reads the private source monorepo, so it additionally needs `github-token` and an explicit `package-root-ref` (the private tag axis, e.g. `v3.3.6`, does not track the public `version`). A package root that lacks blueprint migrations now warns instead of failing the install
 - consumers update their reusable-workflow commit SHA and, independently, the pinned `version` input when they want a newer wp release
+
+## Gating on test outcomes (`wait-for-checks`)
+
+`wait-for-checks` blocks until the named check runs on a commit have **completed
+successfully**, or fails. It is checkout-free and uses only `node`, so it can be
+the first step of a job — before `actions/checkout`, before any toolchain setup,
+and strictly before any credential exchange. A deploy that must not ship an
+unproven commit therefore fails before it costs setup time or touches a secret
+manager.
+
+```yaml
+- uses: webpresso/github-actions/.github/actions/wait-for-checks@<full-commit-sha>
+  with:
+    contexts: wp-check # comma and/or newline separated check-run NAMES
+    timeout-seconds: 900 # hard upper bound (default)
+    poll-interval-seconds: 20 # default
+    workflow: ci.yml # optional; only needed to disambiguate (see below)
+```
+
+The calling job must grant `permissions: { checks: read }` — plus
+`actions: read` when `workflow` is set, because attributing a check run to its
+workflow requires reading the owning workflow run.
+
+Three decisions are load-bearing:
+
+- **Only `success` passes, and `skipped` is a failure.** GitHub's branch
+  protection counts a skipped required check as a pass; this action does not. A
+  gate that never ran has proven nothing about the commit, and inheriting that
+  convention would let a deploy proceed from exactly the commit this is meant to
+  stop. Every other conclusion (`failure`, `cancelled`, `timed_out`,
+  `action_required`, `neutral`, `stale`, …) fails too, and an unrecognised
+  future conclusion fails closed.
+- **Same-name multiplicity is reported, never guessed.** One commit can carry
+  several check runs with the same name — two workflows can each define a job
+  with that name, and a `pull_request` suite and a `push` suite can both attach
+  to one SHA. When the runs disagree, the action fails and prints every
+  conflicting run with its URL; set `workflow` to pick the owning workflow (by
+  file name, repo-relative path, or display name). Runs that agree (re-runs) are
+  fine and the most recent is used.
+- **The bound is loud and specific.** On timeout each context is reported as
+  either `PENDING` (a check run exists but has not completed) or
+  `NEVER OBSERVED` (no check run with that name) — different symptoms with
+  different fixes. An HTTP 401/403/404 aborts immediately naming the missing
+  scope instead of masquerading as "not yet appeared", and a terminal
+  non-success conclusion fails fast rather than polling to the bound.
 
 Security contract:
 - reusable deployment workflows use repo-owned secret profiles and require a

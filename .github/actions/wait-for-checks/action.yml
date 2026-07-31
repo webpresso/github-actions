@@ -1,0 +1,455 @@
+name: Wait for required checks
+description: >
+  Block until the named check runs on a commit have COMPLETED SUCCESSFULLY, or
+  fail. Bounded, fail-fast, checkout-free: it can run as the first step of a
+  reusable workflow, before actions/checkout and strictly before any credential
+  exchange, so a caller that must not deploy from an unproven commit fails
+  before spending setup time or touching a secret manager.
+
+inputs:
+  contexts:
+    description: >
+      Check-run names to wait for, separated by commas and/or newlines
+      (e.g. "wp-check" or "quality, e2e"). A name here is the check run's name,
+      which for a GitHub Actions job is its `name:` (or the job id when it has
+      none) -- not the workflow name.
+    required: true
+  ref:
+    description: Commit SHA whose check runs are inspected.
+    required: false
+    default: ${{ github.sha }}
+  repository:
+    description: owner/repo that owns the commit.
+    required: false
+    default: ${{ github.repository }}
+  timeout-seconds:
+    description: Hard upper bound on the total wait.
+    required: false
+    default: "900"
+  poll-interval-seconds:
+    description: Delay between polls of the check-runs API.
+    required: false
+    default: "20"
+  token:
+    description: >
+      Token used to read check runs. Needs `checks: read` on the repository, and
+      additionally `actions: read` when `workflow` is set (attributing a check
+      run to its workflow requires reading the owning workflow run).
+    required: false
+    default: ${{ github.token }}
+  workflow:
+    description: >
+      Optional owning-workflow filter, matched against the workflow file name
+      (`ci.yml`), its repo-relative path (`.github/workflows/ci.yml`), or its
+      display name (`CI`). Use it when the same check-run name is defined by
+      more than one workflow on the same commit; without it, conflicting runs
+      are reported as an error rather than guessed at.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for named check runs
+      shell: bash
+      env:
+        # Nothing is interpolated into the shell or the JavaScript body: every
+        # caller-controlled value crosses the boundary as an environment
+        # variable, so no input can be parsed as code.
+        WAIT_CONTEXTS: ${{ inputs.contexts }}
+        WAIT_REF: ${{ inputs.ref }}
+        WAIT_REPOSITORY: ${{ inputs.repository }}
+        WAIT_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        WAIT_POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
+        WAIT_TOKEN: ${{ inputs.token }}
+        WAIT_WORKFLOW: ${{ inputs.workflow }}
+        WAIT_HELPER: ${{ runner.temp }}/webpresso-wait-for-checks.cjs
+      run: |
+        set -euo pipefail
+
+        # Runtime choice: `node`, not `gh` and not `jq`.
+        #
+        # `gh` is not a safe common denominator -- some consumers run on
+        # self-hosted runners whose image ships neither the GitHub CLI nor jq,
+        # and this action must work as the very first step of a job, before any
+        # tool-setup action has run. `node` is already this repository's
+        # established runner-side scripting runtime (setup-webpresso-toolchain
+        # invokes bare `node` in its first step, before actions/setup-node), it
+        # is preinstalled on GitHub-hosted images and required by the Actions
+        # runner itself, and it gives real JSON handling for the disambiguation
+        # logic below -- which is not something to write in jq filters.
+        #
+        # The program is written to a file rather than piped on stdin so the
+        # contract suite can extract it from this heredoc and execute it under
+        # `node` against a mocked GitHub API. See test/wait-for-checks.test.ts.
+        cat > "${WAIT_HELPER}" <<'NODE'
+        const fs = require("node:fs");
+
+        const API_ROOT = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/u, "");
+        const REPOSITORY = (process.env.WAIT_REPOSITORY || "").trim();
+        const REF = (process.env.WAIT_REF || "").trim();
+        const TOKEN = process.env.WAIT_TOKEN || "";
+        const WORKFLOW = (process.env.WAIT_WORKFLOW || "").trim();
+        const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY || "";
+
+        /**
+         * Every conclusion below fails this gate. `skipped` is in the list on
+         * purpose and is the one that surprises people: GitHub's own branch
+         * protection counts a SKIPPED required check as a pass, so a job that
+         * never ran can satisfy a "required" rule. Inheriting that convention
+         * here would let a deploy proceed from a commit whose gate never
+         * actually executed, which is exactly the failure this action exists to
+         * prevent. A gate that did not run is not a gate that passed.
+         *
+         * The list is documentation, not the rule: the rule is `conclusion ===
+         * "success"`, so any conclusion GitHub adds later fails closed too.
+         */
+        const FAILING_CONCLUSIONS = [
+          "failure",
+          "cancelled",
+          "timed_out",
+          "action_required",
+          "neutral",
+          "skipped",
+          "stale",
+          "startup_failure",
+        ];
+
+        const STATE_PENDING = "PENDING";
+        const STATE_MISSING = "NEVER OBSERVED";
+        const STATE_SUCCESS = "SUCCESS";
+
+        const summaryLines = [];
+
+        function note(message) {
+          console.log(message);
+        }
+
+        function writeSummary() {
+          if (SUMMARY_PATH.length === 0 || summaryLines.length === 0) {
+            return;
+          }
+          fs.appendFileSync(SUMMARY_PATH, `${summaryLines.join("\n")}\n`);
+        }
+
+        function abort(code, lines) {
+          for (const line of lines) {
+            console.log(`::error::${line}`);
+          }
+          writeSummary();
+          process.exit(code);
+        }
+
+        function parseContexts(raw) {
+          const seen = new Set();
+          for (const part of String(raw || "").split(/[\n,]/u)) {
+            const name = part.trim();
+            if (name.length > 0) {
+              seen.add(name);
+            }
+          }
+          return [...seen];
+        }
+
+        function positiveNumber(raw, label) {
+          const value = Number(String(raw ?? "").trim());
+          if (!Number.isFinite(value) || value <= 0) {
+            abort(2, [`wait-for-checks: ${label} must be a positive number, got "${String(raw ?? "")}".`]);
+          }
+          return value;
+        }
+
+        const CONTEXTS = parseContexts(process.env.WAIT_CONTEXTS);
+        if (CONTEXTS.length === 0) {
+          abort(2, ["wait-for-checks: input `contexts` is required and must name at least one check run."]);
+        }
+        if (REPOSITORY.length === 0 || REF.length === 0) {
+          abort(2, ["wait-for-checks: inputs `repository` and `ref` must both be non-empty."]);
+        }
+        const TIMEOUT_MS = positiveNumber(process.env.WAIT_TIMEOUT_SECONDS, "timeout-seconds") * 1000;
+        const POLL_MS = positiveNumber(process.env.WAIT_POLL_INTERVAL_SECONDS, "poll-interval-seconds") * 1000;
+
+        /** Retryable API trouble (5xx, rate limiting, transport). Never an auth failure. */
+        class TransientApiError extends Error {}
+
+        async function api(path) {
+          const headers = {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "webpresso-wait-for-checks",
+          };
+          if (TOKEN.length > 0) {
+            headers.Authorization = `Bearer ${TOKEN}`;
+          }
+
+          let response;
+          try {
+            response = await fetch(`${API_ROOT}${path}`, { headers });
+          } catch (error) {
+            throw new TransientApiError(`request to ${path} failed: ${String(error)}`);
+          }
+
+          // An authorization or visibility failure is NOT "the check has not
+          // appeared yet". Treating 401/403/404 as pending would turn every
+          // permissions regression into a full-timeout stall on every run, and
+          // the resulting message would blame CI instead of the token.
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            abort(1, [
+              `wait-for-checks: GitHub API returned HTTP ${response.status} for ${path}.`,
+              "This is an authorization/visibility failure, not a pending check, so the wait is aborted immediately.",
+              "Grant the calling job `permissions: { checks: read }` (plus `actions: read` when the `workflow` input is set),",
+              `and confirm the supplied token can see ${REPOSITORY} at ${REF}.`,
+            ]);
+          }
+          if (!response.ok) {
+            throw new TransientApiError(`${path} returned HTTP ${response.status}`);
+          }
+          try {
+            return await response.json();
+          } catch (error) {
+            throw new TransientApiError(`${path} returned a non-JSON body: ${String(error)}`);
+          }
+        }
+
+        async function collectCheckRuns() {
+          const runs = [];
+          // `filter` is left at its default (`latest`), which is per check
+          // SUITE -- it does not collapse same-named runs from different
+          // workflows, which is why the disambiguation below is necessary.
+          for (let page = 1; page <= 10; page += 1) {
+            const payload = await api(
+              `/repos/${REPOSITORY}/commits/${encodeURIComponent(REF)}/check-runs?per_page=100&page=${page}`,
+            );
+            const batch = Array.isArray(payload && payload.check_runs) ? payload.check_runs : [];
+            runs.push(...batch);
+            if (batch.length < 100) {
+              break;
+            }
+          }
+          return runs;
+        }
+
+        function runIdOf(checkRun) {
+          const source = String((checkRun && (checkRun.details_url || checkRun.html_url)) || "");
+          const match = /\/actions\/runs\/(\d+)/u.exec(source);
+          return match ? match[1] : "";
+        }
+
+        const workflowCache = new Map();
+
+        async function workflowOf(checkRun) {
+          const id = runIdOf(checkRun);
+          if (id.length === 0) {
+            abort(1, [
+              `wait-for-checks: the \`workflow\` input is set, but check run "${String(checkRun.name)}" is not a GitHub Actions run`,
+              "so it cannot be attributed to a workflow. Drop the `workflow` input, or name a context produced by Actions.",
+            ]);
+          }
+          if (!workflowCache.has(id)) {
+            const run = await api(`/repos/${REPOSITORY}/actions/runs/${id}`);
+            workflowCache.set(id, {
+              name: String((run && run.name) || ""),
+              path: String((run && run.path) || ""),
+            });
+          }
+          return workflowCache.get(id);
+        }
+
+        function matchesWorkflow(info) {
+          const base = info.path.split("/").pop() || "";
+          return info.name === WORKFLOW || info.path === WORKFLOW || base === WORKFLOW;
+        }
+
+        function describe(checkRun) {
+          const conclusion = checkRun.status === "completed" ? String(checkRun.conclusion) : String(checkRun.status);
+          return `${String(checkRun.name)} [${conclusion}] ${String(checkRun.details_url || checkRun.html_url || "<no url>")}`;
+        }
+
+        function timeOf(checkRun) {
+          const stamp = checkRun.completed_at || checkRun.started_at || "";
+          const parsed = Date.parse(String(stamp));
+          return Number.isNaN(parsed) ? 0 : parsed;
+        }
+
+        function mostRecent(checkRuns) {
+          return [...checkRuns].sort((left, right) => timeOf(right) - timeOf(left))[0];
+        }
+
+        async function candidatesFor(context, allRuns) {
+          const named = allRuns.filter((checkRun) => String(checkRun.name) === context);
+          if (WORKFLOW.length === 0 || named.length === 0) {
+            return named;
+          }
+          const kept = [];
+          for (const checkRun of named) {
+            if (matchesWorkflow(await workflowOf(checkRun))) {
+              kept.push(checkRun);
+            }
+          }
+          return kept;
+        }
+
+        /**
+         * Same-name multiplicity is real, not theoretical: two different
+         * workflows may each define a job with the same name, and a
+         * pull_request suite and a push suite can both attach to one SHA. The
+         * check-runs API returns all of them. Picking one would make the gate's
+         * verdict depend on API ordering, so a genuine disagreement is reported
+         * as a conflict and the caller disambiguates with `workflow`. Multiple
+         * runs that AGREE (re-runs) are fine.
+         */
+        async function evaluate(context, allRuns) {
+          const candidates = await candidatesFor(context, allRuns);
+          if (candidates.length === 0) {
+            return { state: STATE_MISSING };
+          }
+          const completed = candidates.filter((checkRun) => checkRun.status === "completed");
+          const conclusions = [...new Set(completed.map((checkRun) => String(checkRun.conclusion)))];
+          if (conclusions.length > 1) {
+            return { state: "CONFLICT", runs: completed, conclusions };
+          }
+          if (conclusions.length === 1 && conclusions[0] !== "success") {
+            return { state: "FAILED", conclusion: conclusions[0], run: mostRecent(completed) };
+          }
+          if (completed.length < candidates.length) {
+            return { state: STATE_PENDING };
+          }
+          return { state: STATE_SUCCESS, run: mostRecent(completed) };
+        }
+
+        function sleep(ms) {
+          return new Promise((resolve) => {
+            setTimeout(resolve, ms);
+          });
+        }
+
+        function recordSummary(results) {
+          summaryLines.push(`### wait-for-checks: ${REPOSITORY}@${REF}`);
+          for (const [context, result] of results) {
+            summaryLines.push(`- \`${context}\`: ${result.state}`);
+          }
+        }
+
+        function failConflict(context, result) {
+          const lines = [
+            `wait-for-checks: "${context}" resolves to ${result.runs.length} completed check runs with DIFFERENT conclusions`,
+            `(${result.conclusions.join(", ")}) on ${REPOSITORY}@${REF}. Refusing to guess which one is the gate.`,
+          ];
+          for (const checkRun of result.runs) {
+            lines.push(`  conflicting run: ${describe(checkRun)}`);
+          }
+          lines.push(
+            "Set the `workflow` input to the workflow that owns the gate, or give the jobs distinct names.",
+          );
+          abort(1, lines);
+        }
+
+        function failTerminal(context, result) {
+          const failing = FAILING_CONCLUSIONS.includes(result.conclusion)
+            ? `concluded "${result.conclusion}"`
+            : `concluded "${result.conclusion}", which is not "success"`;
+          const extra =
+            result.conclusion === "skipped"
+              ? [
+                  "A skipped check is treated as a FAILURE here: branch protection counts it as a pass, but a gate that",
+                  "never ran has proven nothing about this commit.",
+                ]
+              : [];
+          abort(1, [
+            `wait-for-checks: "${context}" ${failing} on ${REPOSITORY}@${REF}.`,
+            ...extra,
+            `  ${describe(result.run)}`,
+          ]);
+        }
+
+        function failTimeout(results, seconds) {
+          const lines = [
+            `wait-for-checks: timed out after ${seconds}s waiting for ${REPOSITORY}@${REF}.`,
+          ];
+          for (const [context, result] of results) {
+            if (result.state === STATE_PENDING) {
+              lines.push(`  ${context}: PENDING -- the check run exists but has not completed. Raise timeout-seconds only if the job is genuinely this slow.`);
+            } else if (result.state === STATE_MISSING) {
+              lines.push(`  ${context}: NEVER OBSERVED -- no check run with this name was found on the commit.`);
+            }
+          }
+          if (results.some(([, result]) => result.state === STATE_MISSING)) {
+            lines.push(
+              "NEVER OBSERVED usually means the name is wrong or CI never triggered for this event/commit -- check the",
+            );
+            lines.push(
+              `check-run names on ${REPOSITORY}@${REF}, and whether the producing workflow runs for this event at all.`,
+            );
+            if (WORKFLOW.length > 0) {
+              lines.push(`It can also mean no run of workflow "${WORKFLOW}" produced that name.`);
+            }
+          }
+          abort(1, lines);
+        }
+
+        async function main() {
+          note(`wait-for-checks: waiting on ${CONTEXTS.join(", ")} for ${REPOSITORY}@${REF}`);
+          const startedAt = Date.now();
+          const deadline = startedAt + TIMEOUT_MS;
+          let results = CONTEXTS.map((context) => [context, { state: STATE_MISSING }]);
+
+          for (;;) {
+            let allRuns;
+            try {
+              allRuns = await collectCheckRuns();
+            } catch (error) {
+              if (!(error instanceof TransientApiError)) {
+                throw error;
+              }
+              console.log(`::warning::wait-for-checks: ${error.message}; retrying`);
+              allRuns = null;
+            }
+
+            if (allRuns !== null) {
+              results = [];
+              for (const context of CONTEXTS) {
+                results.push([context, await evaluate(context, allRuns)]);
+              }
+
+              // Fail fast: a terminal non-success verdict cannot become a pass,
+              // so polling on to the bound would only delay the same failure.
+              for (const [context, result] of results) {
+                if (result.state === "CONFLICT") {
+                  recordSummary(results);
+                  failConflict(context, result);
+                }
+                if (result.state === "FAILED") {
+                  recordSummary(results);
+                  failTerminal(context, result);
+                }
+              }
+
+              if (results.every(([, result]) => result.state === STATE_SUCCESS)) {
+                recordSummary(results);
+                writeSummary();
+                note(`wait-for-checks: all ${results.length} context(s) succeeded on ${REPOSITORY}@${REF}`);
+                return;
+              }
+
+              note(
+                `wait-for-checks: still waiting -- ${results
+                  .map(([context, result]) => `${context}=${result.state}`)
+                  .join(", ")}`,
+              );
+            }
+
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+              recordSummary(results);
+              failTimeout(results, Math.round((Date.now() - startedAt) / 1000));
+            }
+            await sleep(Math.min(POLL_MS, remaining));
+          }
+        }
+
+        main().catch((error) => {
+          abort(1, [`wait-for-checks: ${error && error.stack ? error.stack : String(error)}`]);
+        });
+        NODE
+
+        node "${WAIT_HELPER}"
