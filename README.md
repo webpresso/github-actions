@@ -3,7 +3,6 @@
 Public reusable GitHub Actions workflows for Webpresso consumer repositories.
 
 Current workflows:
-- `.github/workflows/webpresso-ci.yml`
 - `.github/workflows/webpresso-security.yml`
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
@@ -108,6 +107,53 @@ Three decisions are load-bearing:
   different fixes. An HTTP 401/403/404 aborts immediately naming the missing
   scope instead of masquerading as "not yet appeared", and a terminal
   non-success conclusion fails fast rather than polling to the bound.
+
+### Gating a reusable workflow on it (`require_checks`)
+
+`cloudflare-preview.yml`, `cloudflare-production.yml`, and
+`changesets-release.yml` each accept an optional `require_checks` input. When it
+is non-empty the wait runs as the **first step of the job** — before
+`actions/checkout`, before toolchain setup, and strictly before any Doppler /
+OIDC credential exchange — so a caller that must not ship an unproven commit
+fails before spending setup time or touching a secret manager.
+
+```yaml
+jobs:
+  deploy:
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      checks: read # job-level permissions REPLACE the defaults; list them all
+    uses: webpresso/github-actions/.github/workflows/cloudflare-production.yml@<full-commit-sha>
+    with:
+      require_checks: wp-check # empty (the default) disables the gate entirely
+      require_checks_timeout_seconds: 900
+      job_timeout_minutes: 30
+      # …existing inputs unchanged
+```
+
+Three things about this surface are load-bearing:
+
+- **It is optional with a default, so it is backward compatible.** An existing
+  SHA-pinned caller that passes nothing resolves `require_checks` to `""`, the
+  step's `if:` evaluates false, and the job behaves exactly as it did before.
+  A required input would have broken every pinned consumer on their next pin
+  bump.
+- **The composite is referenced by its remote pinned SHA, never `./…`.** Inside
+  a reusable workflow a relative `uses:` resolves against the *caller's*
+  checkout, which does not exist at step 0. The pin must also stay **reachable
+  from a branch**: Actions refuses to resolve a `uses:` pin to an unreachable
+  commit — the classic source being a squash-merged PR branch that was then
+  deleted — and reports only an opaque "workflow file issue" with zero jobs
+  created. `self-test.yml` resolves the same pinned reference on every pull
+  request so that failure surfaces here rather than in a consumer's deploy.
+- **`job_timeout_minutes` exists because callers cannot bound a `uses:` job.**
+  `timeout-minutes` is not permitted on a job that calls a reusable workflow, so
+  the bound has to be exposed from inside. This *adds a missing* bound rather
+  than raising one: `cloudflare-production.yml` and `changesets-release.yml`
+  previously had none, so a hung run held the caller's concurrency lock until
+  GitHub's 6h default.
 
 Security contract:
 - reusable deployment workflows use repo-owned secret profiles and require a

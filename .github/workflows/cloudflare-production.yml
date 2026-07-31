@@ -57,6 +57,29 @@ on:
         required: false
         default: false
         type: boolean
+      # Optional WITH A DEFAULT, deliberately: every existing SHA-pinned caller
+      # keeps working untouched and opts in only by passing a value. A required
+      # input would break each pinned consumer the moment they moved the pin.
+      require_checks:
+        description: "Optional comma/newline-separated check-run NAMES that must have completed successfully before this job does anything; empty disables the gate"
+        required: false
+        default: ""
+        type: string
+      require_checks_timeout_seconds:
+        description: "Hard upper bound on the require_checks wait"
+        required: false
+        default: 900
+        type: number
+      # A CALLER CANNOT SET `timeout-minutes` on a job that `uses:` a reusable
+      # workflow -- the key is not allowed on a `uses:` job -- so the only place
+      # this bound can live is here, exposed as an input. This ADDS A MISSING
+      # bound rather than raising one: the job had none at all, so a hung deploy
+      # held the caller's concurrency lock until GitHub's 6h default.
+      job_timeout_minutes:
+        description: "Hard upper bound on the whole deploy job, in minutes"
+        required: false
+        default: 30
+        type: number
       runner:
         description: "Runner label"
         required: false
@@ -73,6 +96,7 @@ jobs:
   production:
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.github_environment }}
+    timeout-minutes: ${{ inputs.job_timeout_minutes }}
     permissions:
       contents: read
       packages: read
@@ -80,12 +104,47 @@ jobs:
       # A called workflow cannot elevate the caller token. This is effective
       # only when a caller explicitly grants issues: write.
       issues: write
+      # A job-level `permissions:` block REPLACES the default token scopes
+      # rather than merging with them, so `checks: read` has to be listed here
+      # alongside every grant this job already needed -- adding it is not
+      # additive to an implicit default. Required by the require_checks step
+      # below (the check-runs API 403s without it, and the action aborts
+      # immediately rather than masquerading the failure as "not yet appeared").
+      checks: read
     env:
       DEPLOY_LANE: prd
       RELEASE_VERSION: ${{ inputs.release_version }}
       SECRET_PROFILE: ${{ inputs.secret_profile }}
       SECRET_SINK: ${{ inputs.secret_sink }}
     steps:
+      # THE FIRST STEP OF THE JOB, deliberately: before actions/checkout, before
+      # toolchain setup, and strictly before any Doppler/OIDC credential
+      # exchange. A caller that must not deploy an unproven commit fails here
+      # having spent no setup time and touched no secret manager.
+      #
+      # Referenced by its REMOTE `owner/repo/path@sha` form, never `./…`: inside
+      # a reusable workflow a relative `uses:` resolves against the CALLER's
+      # checkout, which does not exist at this point in the job -- checkout has
+      # not run, and running it first would defeat the point of gating before
+      # setup. The pin is a full commit SHA that is REACHABLE from this
+      # repository's default branch; Actions refuses to resolve a `uses:` pin to
+      # an unreachable commit (e.g. one left behind by a squash-merged, deleted
+      # branch) and reports only an opaque "workflow file issue" with zero jobs
+      # created.
+      - name: Wait for required checks
+        id: require_checks
+        if: ${{ inputs.require_checks != '' }}
+        uses: webpresso/github-actions/.github/actions/wait-for-checks@8feb6b86fc96738757ba436c576a5e933d501293
+        with:
+          contexts: ${{ inputs.require_checks }}
+          timeout-seconds: ${{ inputs.require_checks_timeout_seconds }}
+          # The commit this job will actually check out, so the gate and the
+          # deploy cannot disagree. `checkout_ref` wins when the caller pinned
+          # one; otherwise this reproduces the action's own default -- the PR
+          # head SHA on a pull_request event, because `github.sha` there is the
+          # ephemeral merge commit and carries zero check runs.
+          ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}

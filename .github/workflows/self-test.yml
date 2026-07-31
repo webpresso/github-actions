@@ -65,6 +65,32 @@ jobs:
           timeout-seconds: 120
           poll-interval-seconds: 5
 
+  # The three reusable workflows reference this composite by its REMOTE
+  # `owner/repo/path@sha` form, because a relative `uses:` inside a reusable
+  # workflow resolves against the CALLER's checkout -- which does not exist
+  # before `actions/checkout`, and the gate step must run before it.
+  #
+  # A remote pin only resolves while the commit stays REACHABLE from a branch.
+  # An unreachable pin (the classic source: a squash-merged PR branch that was
+  # then deleted) fails with an opaque "workflow file issue" and zero jobs
+  # created, which is close to undiagnosable from a consumer's side. This job
+  # exercises the exact pinned reference on every pull request, so that failure
+  # surfaces here rather than in someone's production deploy. It deliberately
+  # takes no checkout: the remote form needs none, which is the whole point.
+  wait-for-checks-remote-pin:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: webpresso/github-actions/.github/actions/wait-for-checks@8feb6b86fc96738757ba436c576a5e933d501293
+        with:
+          contexts: contract-tests
+          timeout-seconds: 120
+          poll-interval-seconds: 5
+
   wait-for-checks-bounded-failure:
     runs-on: ubuntu-latest
     permissions:

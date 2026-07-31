@@ -30,7 +30,6 @@ export const ACTIONS_DIR = join(REPO_ROOT, ".github", "actions");
 export const WORKFLOW_PREVIEW = join(WORKFLOWS_DIR, "cloudflare-preview.yml");
 export const WORKFLOW_PRODUCTION = join(WORKFLOWS_DIR, "cloudflare-production.yml");
 export const WORKFLOW_RELEASE = join(WORKFLOWS_DIR, "changesets-release.yml");
-export const WORKFLOW_CI = join(WORKFLOWS_DIR, "webpresso-ci.yml");
 export const WORKFLOW_SECURITY = join(WORKFLOWS_DIR, "webpresso-security.yml");
 export const WORKFLOW_AGENT_KIT_FRESHNESS = join(WORKFLOWS_DIR, "agent-kit-freshness.yml");
 export const WORKFLOW_SELF_TEST = join(WORKFLOWS_DIR, "self-test.yml");
@@ -38,6 +37,35 @@ export const ACTION_TOOLCHAIN = join(ACTIONS_DIR, "setup-webpresso-toolchain", "
 export const ACTION_SETUP_WP = join(ACTIONS_DIR, "setup-wp", "action.yml");
 export const ACTION_WAIT_FOR_CHECKS = join(ACTIONS_DIR, "wait-for-checks", "action.yml");
 export const README_PATH = join(REPO_ROOT, "README.md");
+
+/**
+ * The three caller-facing workflows that expose the optional `require_checks`
+ * gate. Kept here so the gate contracts and any future consumer cannot drift
+ * over which workflows are in the set.
+ */
+export const REQUIRE_CHECKS_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
+  [WORKFLOW_PREVIEW, "preview"],
+  [WORKFLOW_PRODUCTION, "production"],
+  [WORKFLOW_RELEASE, "release"],
+];
+
+/**
+ * The workflows that additionally expose `job_timeout_minutes`. The preview
+ * workflow is deliberately absent: only these two had an unbounded job.
+ */
+export const JOB_TIMEOUT_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
+  [WORKFLOW_PRODUCTION, "production"],
+  [WORKFLOW_RELEASE, "release"],
+];
+
+/**
+ * `webpresso/github-actions/.github/actions/wait-for-checks@<sha>` — the REMOTE
+ * pinned form the reusable workflows must use. Derived from the workflows
+ * rather than restated as a literal, so bumping the pin is a one-site edit and
+ * the suite still proves every site agrees.
+ */
+export const WAIT_FOR_CHECKS_USES_RE = /\/wait-for-checks@/u;
+export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/actions/wait-for-checks@";
 
 /**
  * agent-kit-freshness.yml is not a caller-consuming CI/deploy workflow: it is a
@@ -214,8 +242,13 @@ const SETUP_WP_USES_RE = /\/setup-wp@/u;
  * make the test file one more site that every freshness bump has to edit, so
  * the expected value is derived from a single canonical workflow at runtime and
  * the suites assert cross-site consistency plus value shape instead.
+ *
+ * The anchor was `webpresso-ci.yml` until that workflow was removed for having
+ * zero consumers across the org. Any workflow carrying exactly one toolchain
+ * pin, one setup-wp pin, and one agent-kit version works; the production deploy
+ * workflow is the most load-bearing survivor, so it is the anchor now.
  */
-export const CANONICAL_PIN_WORKFLOW = WORKFLOW_CI;
+export const CANONICAL_PIN_WORKFLOW = WORKFLOW_PRODUCTION;
 
 function soleMatch(values: readonly string[], pattern: RegExp, label: string): string {
   const unique = [...new Set(values.filter((value) => pattern.test(value)))];
