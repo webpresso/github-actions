@@ -31,7 +31,7 @@ export const WORKFLOW_PREVIEW = join(WORKFLOWS_DIR, "cloudflare-preview.yml");
 export const WORKFLOW_PRODUCTION = join(WORKFLOWS_DIR, "cloudflare-production.yml");
 export const WORKFLOW_RELEASE = join(WORKFLOWS_DIR, "changesets-release.yml");
 export const WORKFLOW_SECURITY = join(WORKFLOWS_DIR, "webpresso-security.yml");
-export const WORKFLOW_AGENT_KIT_FRESHNESS = join(WORKFLOWS_DIR, "agent-kit-freshness.yml");
+export const WORKFLOW_WEBPRESSO_FRESHNESS = join(WORKFLOWS_DIR, "webpresso-freshness.yml");
 export const WORKFLOW_SELF_TEST = join(WORKFLOWS_DIR, "self-test.yml");
 export const ACTION_TOOLCHAIN = join(ACTIONS_DIR, "setup-webpresso-toolchain", "action.yml");
 export const ACTION_SETUP_WP = join(ACTIONS_DIR, "setup-wp", "action.yml");
@@ -68,7 +68,7 @@ export const WAIT_FOR_CHECKS_USES_RE = /\/wait-for-checks@/u;
 export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/actions/wait-for-checks@";
 
 /**
- * agent-kit-freshness.yml is not a caller-consuming CI/deploy workflow: it is a
+ * webpresso-freshness.yml is not a caller-consuming CI/deploy workflow: it is a
  * repo-maintenance automation (npm registry lookup + git + gh CLI) that keeps
  * other workflows' agent-kit pins fresh. It deliberately does not install
  * pnpm/Vite+/wp -- pulling in the shared toolchain for it would be pure scope
@@ -80,7 +80,7 @@ export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/a
  * contract is `self-test.yml gates the contract suite`.
  */
 export const NON_TOOLCHAIN_WORKFLOWS: readonly string[] = [
-  WORKFLOW_AGENT_KIT_FRESHNESS,
+  WORKFLOW_WEBPRESSO_FRESHNESS,
   WORKFLOW_SELF_TEST,
 ];
 
@@ -351,7 +351,7 @@ export function writeFixtureFile(dir: string, relPath: string, contents: string)
 
 /** Build a real committed git repository so `git ls-files` based scans see it. */
 export function initFixtureRepo(files: Readonly<Record<string, string>>): string {
-  const dir = makeTempDir("agent-kit-freshness-fixture-");
+  const dir = makeTempDir("webpresso-freshness-fixture-");
   for (const [relPath, contents] of Object.entries(files)) {
     writeFixtureFile(dir, relPath, contents);
   }

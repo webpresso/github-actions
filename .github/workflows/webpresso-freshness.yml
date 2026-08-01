@@ -1,14 +1,27 @@
-name: Reusable agent-kit freshness
+name: Reusable webpresso freshness
 
-# Keeps pinned @webpresso/agent-kit versions from going stale. Scans the
+# Keeps pinned @webpresso/agent-kit npm versions from going stale. Scans the
 # calling repo's checked-out .github/**/*.yml|yaml files for the known pin
-# shapes (env assignment, shell default, setup-wp `with: version:`, composite
-# `agent-kit-version` input default), and opens (or updates) a single PR that
-# bumps every stale pin to the latest published npm version.
+# shapes (env assignment, shell default, composite `agent-kit-version` input
+# default), and opens (or updates) a single PR that bumps every stale pin to
+# the latest published npm version.
+#
+# TWO VERSION AXES EXIST AND MUST NEVER SHARE A `LATEST`:
+#   * the npm package @webpresso/agent-kit (3.x) -- what this workflow bumps
+#   * the webpresso/app-releases binary line (0.0.x) -- what the setup-wp
+#     action's `version:` input consumes
+# This workflow previously also rewrote the `version:` line under any
+# `uses: .../setup-wp@` step, using the npm-resolved LATEST. That wrote an
+# npm-axis value (e.g. 3.3.7) into an input that resolves against
+# app-releases, where no such tag exists, so setup-wp would 404 on download
+# and break every consumer it "freshened". That shape is deliberately gone:
+# the header always claimed this workflow "does not touch the setup-wp
+# action's exact-version contract" -- now the code agrees. setup-wp version
+# correctness is enforced by `wp audit` in the consumer instead, which can
+# validate the axis rather than blindly bump it.
 #
 # Deliberately scoped to @webpresso/agent-kit only -- this is not a general
-# dependency freshness tool. It does not touch the setup-wp action's
-# exact-version contract, and it never runs `wp setup`.
+# dependency freshness tool, and it never runs `wp setup`.
 on:
   workflow_call: {}
   workflow_dispatch: {}
@@ -18,7 +31,7 @@ env:
 
 jobs:
   freshness:
-    name: agent-kit-freshness
+    name: webpresso-freshness
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -62,8 +75,6 @@ jobs:
           const SEMVER = "\\d+\\.\\d+\\.\\d+";
           const ENV_RE = new RegExp(`(?<![A-Za-z0-9_])AGENT_KIT_VERSION=(${SEMVER})\\b`, "gu");
           const SHELL_DEFAULT_RE = new RegExp(`WP_SETUP_AGENT_KIT_VERSION:-(${SEMVER})\\b`, "gu");
-          const SETUP_WP_USES_RE = /uses:\s*\S*\/setup-wp@/u;
-          const VERSION_LINE_RE = new RegExp(`^(\\s*)version:\\s*(["']?)(${SEMVER})\\2\\s*(#.*)?$`, "u");
           const COMPOSITE_KEY_RE = /^\s*agent-kit-version:\s*(#.*)?$/u;
           const DEFAULT_LINE_RE = new RegExp(`^(\\s*)default:\\s*(["']?)(${SEMVER})\\2\\s*(#.*)?$`, "u");
           const LOOKAHEAD_LIMIT = 4;
@@ -87,7 +98,6 @@ jobs:
             const original = fs.readFileSync(relPath, "utf8");
             const lines = original.split("\n");
             const findings = [];
-            let pendingSetupWpAt = -1;
             let pendingCompositeKeyAt = -1;
 
             for (let i = 0; i < lines.length; i += 1) {
@@ -110,22 +120,6 @@ jobs:
                     `WP_SETUP_AGENT_KIT_VERSION:-${oldValue}`,
                     `WP_SETUP_AGENT_KIT_VERSION:-${LATEST}`,
                   );
-                }
-              }
-
-              if (SETUP_WP_USES_RE.test(line)) {
-                pendingSetupWpAt = i;
-              } else if (pendingSetupWpAt >= 0) {
-                const m = VERSION_LINE_RE.exec(line);
-                if (m) {
-                  const oldValue = m[3];
-                  findings.push({ shape: "setup-wp-input", file: relPath, line: lineNo, oldValue });
-                  if (olderThanLatest(oldValue)) {
-                    lines[i] = `${m[1]}version: ${m[2]}${LATEST}${m[2]}${m[4] ? ` ${m[4]}` : ""}`;
-                  }
-                  pendingSetupWpAt = -1;
-                } else if (/^\s*-\s/u.test(line) || i - pendingSetupWpAt > LOOKAHEAD_LIMIT) {
-                  pendingSetupWpAt = -1;
                 }
               }
 
@@ -169,7 +163,7 @@ jobs:
           if (totalFindings === 0) {
             console.error(
               "::error::No @webpresso/agent-kit version pins found under .github/**/*.yml. " +
-                "The known pin shapes (env assignment, shell default, setup-wp `with: version:`, " +
+                "The known pin shapes (env assignment, shell default, " +
                 "composite `agent-kit-version` input default) may have drifted from this repo's " +
                 "files -- fix the scan patterns instead of letting this pass silently.",
             );
@@ -191,7 +185,7 @@ jobs:
               "| --- | --- | --- | --- |",
               ...bumped.map((f) => `| ${f.shape} | \`${f.file}\` | ${f.line} | ${f.oldValue} |`),
               "",
-              "Opened automatically by the `agent-kit-freshness` reusable workflow.",
+              "Opened automatically by the `webpresso-freshness` reusable workflow.",
             ];
             fs.writeFileSync(process.env.PR_BODY_FILE, `${bodyLines.join("\n")}\n`, "utf8");
             for (const f of bumped) {
