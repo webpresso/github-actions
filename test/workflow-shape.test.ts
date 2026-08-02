@@ -175,6 +175,37 @@ describe("same-run artifact and evidence contract", () => {
       expect(readRepoFile(path)).not.toMatch(/actions:\s*write/u);
     }
   });
+
+  it("keeps artifact and evidence steps inside the fixed least-privilege job boundary", () => {
+    for (const [path, jobName] of DEPLOY_WORKFLOWS) {
+      const workflow = loadYaml(path);
+      expect(dig(workflow, "jobs", jobName, "permissions"), path).toStrictEqual({
+        contents: "read",
+        packages: "read",
+        "id-token": "write",
+        checks: "read",
+      });
+
+      const steps = allSteps(workflow);
+      const downloadIndex = steps.findIndex((step) =>
+        usesOfStep(step)?.startsWith("actions/download-artifact@"),
+      );
+      const evidenceIndex = steps.findIndex((step) =>
+        usesOfStep(step)?.startsWith("actions/upload-artifact@"),
+      );
+      const failureGateIndex = steps.findIndex((step) => step["id"] === "smoke_failure");
+      expect(downloadIndex, `${path} download step`).toBeGreaterThan(-1);
+      expect(evidenceIndex, `${path} evidence step`).toBeGreaterThan(failureGateIndex);
+
+      const download = steps[downloadIndex];
+      const evidence = steps[evidenceIndex];
+      expect(dig(download, "permissions"), path).toBeUndefined();
+      expect(dig(evidence, "permissions"), path).toBeUndefined();
+      expect(dig(evidence, "with", "github-token"), path).toBeUndefined();
+      expect(dig(evidence, "with", "repository"), path).toBeUndefined();
+      expect(dig(evidence, "if"), path).toContain("always()");
+    }
+  });
 });
 
 describe("secret-sink boundary", () => {
