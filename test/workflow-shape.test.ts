@@ -117,6 +117,66 @@ describe("deploy workflow bootstrap contract", () => {
   });
 });
 
+describe("same-run artifact and evidence contract", () => {
+  it("exposes optional input-artifact pattern/path and evidence name/path inputs", () => {
+    for (const [path] of DEPLOY_WORKFLOWS) {
+      const inputs = workflowCallInputs(loadYaml(path));
+      for (const name of [
+        "input_artifact_pattern",
+        "input_artifact_path",
+        "evidence_artifact_name",
+        "evidence_artifact_path",
+      ]) {
+        expect(dig(inputs, name, "type"), `${path} ${name}`).toBe("string");
+        expect(dig(inputs, name, "required"), `${path} ${name}`).toBe(false);
+        expect(dig(inputs, name, "default"), `${path} ${name}`).toBe("");
+      }
+    }
+  });
+
+  it("downloads only a same-run artifact and never grants a cross-run relay", () => {
+    for (const [path] of DEPLOY_WORKFLOWS) {
+      const workflow = loadYaml(path);
+      const download = allSteps(workflow).find((step) =>
+        usesOfStep(step)?.startsWith("actions/download-artifact@"),
+      );
+      expect(download, `${path} download step`).toBeDefined();
+      if (download === undefined) continue;
+      expect(dig(download, "if")).toBe("${{ inputs.input_artifact_pattern != '' }}");
+      expect(dig(download, "with", "pattern")).toBe("${{ inputs.input_artifact_pattern }}");
+      expect(dig(download, "with", "run-id")).toBe("${{ github.run_id }}");
+      expect(dig(download, "with", "repository")).toBeUndefined();
+      expect(dig(download, "with", "github-token")).toBeUndefined();
+      expect(dig(download, "with", "merge-multiple")).toBe(true);
+
+      const contents = readRepoFile(path);
+      expect(contents).toMatch(/PR_HEAD_REPOSITORY/u);
+      expect(contents).toMatch(/pull_request_target/u);
+      expect(contents).toMatch(/REF_PROTECTED/u);
+      expect(contents).toMatch(/input_artifact_path must be a safe workspace-relative directory/u);
+      expect(contents).not.toMatch(/actions:\s*write/u);
+    }
+  });
+
+  it("uploads optional evidence with always semantics and no permission elevation", () => {
+    for (const [path] of DEPLOY_WORKFLOWS) {
+      const workflow = loadYaml(path);
+      const upload = allSteps(workflow).find((step) =>
+        usesOfStep(step)?.startsWith("actions/upload-artifact@"),
+      );
+      expect(upload, `${path} evidence upload step`).toBeDefined();
+      if (upload === undefined) continue;
+      expect(dig(upload, "if")).toBe(
+        "${{ always() && inputs.evidence_artifact_name != '' && inputs.evidence_artifact_path != '' }}",
+      );
+      expect(dig(upload, "with", "name")).toBe("${{ inputs.evidence_artifact_name }}");
+      expect(dig(upload, "with", "path")).toBe("${{ inputs.evidence_artifact_path }}");
+      expect(dig(upload, "with", "if-no-files-found")).toBe("warn");
+      expect(readRepoFile(path)).not.toMatch(/actions:\s*write/u);
+    }
+  });
+});
+
 describe("secret-sink boundary", () => {
   it("deploy workflows never export profiles or runtime secrets job-wide", () => {
     for (const [path, jobName] of DEPLOY_WORKFLOWS) {
