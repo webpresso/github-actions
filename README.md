@@ -196,6 +196,35 @@ set `doppler_identity_id` and omit `ci_secret_provider_token`. To enable
 rollback, the caller's deploy block writes `release_id=<id>` to
 `$GITHUB_OUTPUT` and reads the provided `RELEASE_ID` in `rollback_command`.
 
+### Same-run artifacts and evidence
+
+The preview and production deploy workflows expose four optional inputs for
+artifact handoff:
+
+```yaml
+with:
+  input_artifact_pattern: build-*       # empty (the default) skips download
+  input_artifact_path: build-input     # workspace-relative, outside .github/.webpresso
+  evidence_artifact_name: deploy-evidence-${{ github.run_id }}
+  evidence_artifact_path: artifacts/evidence/**
+```
+
+`input_artifact_pattern` is downloaded with `actions/download-artifact` using
+the current `github.run_id`, with no repository or token override. This is a
+same-run handoff, never a cross-run or cross-repository lookup. The optional
+destination is workspace-relative and rejects absolute paths, traversal, and
+`.github`/`.webpresso` policy or secret directories. Fork pull-request artifacts
+are rejected before download in preview; production rejects all pull-request
+input artifacts because it is an environment-owned privileged job. Non-PR
+artifact consumers must also run from a protected ref; this prevents a manual
+dispatch or branch push from smuggling untrusted bytes into a privileged job.
+
+When both evidence inputs are present, `actions/upload-artifact` runs with
+`always()` after the final deployment step, so install, verify, deploy, smoke,
+rollback, and validation failures still leave the requested evidence when the
+path exists. The upload action does not add a permission scope; callers keep
+the existing reusable-workflow permission intersection.
+
 ## agent-kit freshness (`agent-kit-freshness.yml`)
 
 Consumers pin `@webpresso/agent-kit` in their own workflow YAML (an env

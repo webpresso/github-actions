@@ -42,6 +42,26 @@ on:
         required: false
         default: ""
         type: string
+      input_artifact_pattern:
+        description: "Optional artifact name/pattern to download from this workflow run before caller commands"
+        required: false
+        default: ""
+        type: string
+      input_artifact_path:
+        description: "Optional workspace-relative destination for the same-run input artifact; defaults to webpresso-input-artifact"
+        required: false
+        default: ""
+        type: string
+      evidence_artifact_name:
+        description: "Optional artifact name for deployment evidence; uploaded even when a caller command fails"
+        required: false
+        default: ""
+        type: string
+      evidence_artifact_path:
+        description: "Optional evidence file or glob to upload after the deployment job"
+        required: false
+        default: ""
+        type: string
       doppler_identity_id:
         description: "Optional Doppler OIDC service account identity ID; when empty, ci_secret_provider_token is required"
         required: false
@@ -206,6 +226,63 @@ jobs:
           console.log(`secret_environment=${profile.environment}`);
           NODE
 
+      - name: Validate production artifact boundary
+        if: ${{ inputs.input_artifact_pattern != '' || inputs.evidence_artifact_name != '' || inputs.evidence_artifact_path != '' }}
+        shell: bash
+        env:
+          INPUT_ARTIFACT_PATTERN: ${{ inputs.input_artifact_pattern }}
+          INPUT_ARTIFACT_PATH: ${{ inputs.input_artifact_path }}
+          EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+          EVIDENCE_ARTIFACT_PATH: ${{ inputs.evidence_artifact_path }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          REPOSITORY: ${{ github.repository }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_ARTIFACT_PATH}" && -z "${INPUT_ARTIFACT_PATTERN}" ]]; then
+            echo "input_artifact_path requires input_artifact_pattern." >&2
+            exit 1
+          fi
+          if [[ -n "${INPUT_ARTIFACT_PATTERN}" ]]; then
+            # Production is privileged: no pull-request event may move an
+            # artifact into it, including same-repository PRs. This keeps
+            # untrusted workflow producers out of environment-owned secrets.
+            if [[ "${EVENT_NAME}" == "pull_request" || "${EVENT_NAME}" == "pull_request_target" ]]; then
+              echo "Production input artifacts are disabled for pull-request events (head=${PR_HEAD_REPOSITORY}, base=${REPOSITORY})." >&2
+              exit 1
+            fi
+            if [[ "${REF_PROTECTED}" != "true" ]]; then
+              echo "Production input artifacts require a protected ref." >&2
+              exit 1
+            fi
+            if [[ "${INPUT_ARTIFACT_PATTERN}" == *$'\n'* || "${INPUT_ARTIFACT_PATTERN}" == *$'\r'* || "${INPUT_ARTIFACT_PATTERN}" == *".."* || "${INPUT_ARTIFACT_PATTERN}" == /* ]]; then
+              echo "input_artifact_pattern must be a same-run artifact name/pattern without traversal or control characters." >&2
+              exit 1
+            fi
+          fi
+          if [[ -n "${INPUT_ARTIFACT_PATH}" ]] && { [[ "${INPUT_ARTIFACT_PATH}" == /* ]] || [[ "${INPUT_ARTIFACT_PATH}" == "." ]] || [[ "${INPUT_ARTIFACT_PATH}" == ./* ]] || [[ "${INPUT_ARTIFACT_PATH}" == *".."* ]] || [[ "${INPUT_ARTIFACT_PATH}" == .github ]] || [[ "${INPUT_ARTIFACT_PATH}" == .github/* ]] || [[ "${INPUT_ARTIFACT_PATH}" == .webpresso ]] || [[ "${INPUT_ARTIFACT_PATH}" == .webpresso/* ]]; }; then
+            echo "input_artifact_path must be a safe workspace-relative directory outside .github and .webpresso." >&2
+            exit 1
+          fi
+          if [[ -n "${EVIDENCE_ARTIFACT_NAME}" || -n "${EVIDENCE_ARTIFACT_PATH}" ]] && [[ -z "${EVIDENCE_ARTIFACT_NAME}" || -z "${EVIDENCE_ARTIFACT_PATH}" ]]; then
+            echo "evidence_artifact_name and evidence_artifact_path must be provided together." >&2
+            exit 1
+          fi
+
+      # Same-run only: omitting both `repository` and `github-token` prevents
+      # this reusable workflow from turning an input into a cross-repository or
+      # cross-run artifact relay. `run-id` is explicit to make that boundary
+      # auditable in the rendered workflow.
+      - name: Download same-run input artifact
+        if: ${{ inputs.input_artifact_pattern != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ${{ inputs.input_artifact_pattern }}
+          path: ${{ inputs.input_artifact_path != '' && inputs.input_artifact_path || 'webpresso-input-artifact' }}
+          run-id: ${{ github.run_id }}
+          merge-multiple: true
+
       - name: Install caller dependencies
         id: install
         shell: bash
@@ -352,3 +429,12 @@ jobs:
         run: |
           echo "Post-deploy smoke verification failed; any configured rollback has finished." >&2
           exit 1
+
+      - name: Upload deployment evidence
+        if: ${{ always() && inputs.evidence_artifact_name != '' && inputs.evidence_artifact_path != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.evidence_artifact_name }}
+          path: ${{ inputs.evidence_artifact_path }}
+          if-no-files-found: warn
+          retention-days: 14
