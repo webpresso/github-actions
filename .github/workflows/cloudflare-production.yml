@@ -88,6 +88,13 @@ on:
     secrets:
       ci_secret_provider_token:
         required: false
+    # ADDITIVE, deliberately: a workflow_call output is invisible to any caller
+    # that does not read it, so every existing SHA-pinned consumer keeps
+    # working untouched and opts in only by consuming the value.
+    outputs:
+      deploy_outputs:
+        description: "Opaque passthrough of the caller deploy block's `deploy_outputs` step output (written to $GITHUB_OUTPUT by the deploy command). Empty when the deploy block writes nothing."
+        value: ${{ jobs.production.outputs.deploy_outputs }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -97,6 +104,12 @@ jobs:
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.github_environment }}
     timeout-minutes: ${{ inputs.job_timeout_minutes }}
+    outputs:
+      # The deploy child process inherits GITHUB_OUTPUT, so anything the
+      # caller's deploy block writes there surfaces on `steps.deploy` without
+      # further wiring; this hop makes `deploy_outputs` a job output the
+      # workflow_call output above can reference.
+      deploy_outputs: ${{ steps.deploy.outputs.deploy_outputs }}
     permissions:
       contents: read
       packages: read
