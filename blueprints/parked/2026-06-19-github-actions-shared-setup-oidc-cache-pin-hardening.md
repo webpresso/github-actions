@@ -2,14 +2,13 @@
 type: blueprint
 title: "GitHub Actions: shared setup, OIDC bootstrap, cache, pin hardening"
 owner: webpresso
-status: in-progress
+status: parked
 complexity: M
 created: "2026-06-19"
-last_updated: "2026-07-13"
-progress: "99% (catalog-aware Vite+ bootstrap and immutable shared-workflow repin complete; caller production proof remains)"
+last_updated: "2026-08-10"
+progress: 0% (0/0 tasks done, 0 blocked, updated 2026-08-10)
 depends_on: []
-cross_repo_depends_on:
-  - /Users/ozby/repos/_worktrees/agent-kit-dedupe/blueprints/in-progress/2026-06-19-agent-kit-wp-shared-e2e-secrets-act-supervisor.md
+cross_repo_depends_on: []
 tags:
   - github-actions
   - oidc
