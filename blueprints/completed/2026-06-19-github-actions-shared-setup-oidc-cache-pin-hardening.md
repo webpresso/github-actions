@@ -2,11 +2,12 @@
 type: blueprint
 title: "GitHub Actions: shared setup, OIDC bootstrap, cache, pin hardening"
 owner: webpresso
-status: parked
+status: completed
 complexity: M
 created: "2026-06-19"
 last_updated: "2026-08-10"
-progress: 0% (0/0 tasks done, 0 blocked, updated 2026-08-10)
+completed_at: "2026-08-10"
+progress: "100% (caller OIDC proof recorded; parked residual closed)"
 depends_on: []
 cross_repo_depends_on: []
 tags:
@@ -24,7 +25,7 @@ tags:
 ## Tasks
 
 1. Define shared setup surface for install/cache/tool bootstrap. ✅
-2. Standardize reusable e2e/deploy/cleanup workflow shells. ◐
+2. Standardize reusable e2e/deploy/cleanup workflow shells. ✅
 3. Ensure capability-aware bootstrap for provider auth in CI. ✅
 4. Remove broad job-wide secret exports. ✅
 5. SHA-pin every third-party action in secret-bearing jobs. ✅
@@ -93,3 +94,16 @@ tags:
   Every reusable workflow now pins that commit, no workflow passes the removed
   `cli-global-packages` input, and contract coverage verifies that each
   `setup-wp` invocation follows the owner toolchain setup in the same job.
+
+## Caller production proof (completed 2026-08-10)
+
+Non-skipped monorepo Preview Deploy job exercised the shared reusable OIDC path:
+
+- Run: https://github.com/webpresso/monorepo/actions/runs/31342752925
+- Job: Deploy main preview / preview (success)
+- Job URL: https://github.com/webpresso/monorepo/actions/runs/31342752925/job/93319166595
+- Shared setup pin: `setup-webpresso-toolchain@d0de856fd4e786ab59875afbecf55b579d83c379`
+- Critical non-skipped steps: Validate sink/profile, Doppler OIDC exchange, deploy through secret sink.
+- Not counted as proof: Production Deploy owner-detect runs that skip deploy jobs; app inline cloudflare workflows.
+
+Caller wire-up (structural): monorepo `.github/workflows/production-deploy.yml` and `preview-deploy.yml` call `webpresso/github-actions/.github/workflows/cloudflare-*.yml` with `secret_sink`, `github_environment`, and `doppler_identity_id`.
