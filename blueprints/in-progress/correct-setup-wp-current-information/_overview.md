@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "Correct setup-wp current information"
-status: planned
+status: in-progress
 complexity: S
 owner: "webpresso/github-actions"
 created: "2026-08-23"
@@ -103,6 +103,8 @@ review_dispositions:
   - finding_id: "gate:b806ebecbcb277cf:grok:grok-4.5#2"
     disposition: fixed
     evidence: "C8 now attributes token/package-root/export/failure drift to README plus inputs.package-root.description; C9 separately attributes freshness filename/pin-shape drift to README only."
+worktree_owner_id: owner-19be7eb9f9d6
+worktree_owner_branch: bp/correct-setup-wp-current-information
 ---
 
 # Correct setup-wp current information
