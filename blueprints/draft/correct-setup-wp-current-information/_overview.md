@@ -1,9 +1,9 @@
 ---
 type: blueprint
-title: Correct setup-wp current information
+title: "Correct setup-wp current information"
 status: draft
 complexity: S
-owner: webpresso/github-actions
+owner: "webpresso/github-actions"
 created: "2026-08-23"
 last_updated: "2026-08-23"
 progress: "0% (0/1 tasks done, 0 blocked)"
@@ -93,10 +93,16 @@ review_dispositions:
     evidence: "Summary and D1 make latest-main executable source at task start the sole authority. 36b412a is historical only; drift requires typed rewrite, validation, and re-review before implementation."
   - finding_id: "gate:55752e1b5cd7160f:grok:grok-4.5#2"
     disposition: fixed
-    evidence: "Promotion Gates now name focused, setup-wp, freshness, and workflow-shape suites as exact wp facade commands."
+    evidence: "Promotion Gates name focused, setup-wp, freshness, and workflow-shape suites as exact wp facade commands."
   - finding_id: "gate:55752e1b5cd7160f:grok:grok-4.5#3"
     disposition: fixed
     evidence: "C6 cites both test/setup-wp.test.ts and test/freshness.test.ts for its two-part executable-lock claim."
+  - finding_id: "gate:b806ebecbcb277cf:grok:grok-4.5#1"
+    disposition: fixed
+    evidence: "Task 1.1 now freezes input keys/defaults/required flags and runs.steps/workflow behavior while explicitly permitting descriptive metadata fields, including inputs.package-root.description, to change for source parity."
+  - finding_id: "gate:b806ebecbcb277cf:grok:grok-4.5#2"
+    disposition: fixed
+    evidence: "C8 now attributes token/package-root/export/failure drift to README plus inputs.package-root.description; C9 separately attributes freshness filename/pin-shape drift to README only."
 ---
 
 # Correct setup-wp current information
@@ -119,7 +125,7 @@ At task start, align the owner worktree with latest origin/main and treat the ex
 **Depends:** None
 **Produces:** actions-current-truth-merge-sha
 
-Preflight latest main and apply the Summary/D1 authority rule before RED. Write the focused source-parity test first and observe failure on stale prose. Correct README setup-wp/freshness guidance and only stale descriptive metadata in setup-wp/action.yml; leave runs.steps, workflow bytes, identifiers, inputs, pins, URLs, permissions, triggers, and behavior unchanged. Reuse existing YAML helpers rather than adding a parser or abstraction. Compare prose with executable source; do not encode unsupported product inventory or future updater/qualification behavior.
+Preflight latest main and apply the Summary/D1 authority rule before RED. Write the focused source-parity test first and observe failure on stale prose. Correct README setup-wp/freshness guidance and stale descriptive metadata fields in setup-wp/action.yml, including inputs.package-root.description where source parity requires it. Action input keys, defaults, and required flags plus action runs.steps and all freshness-workflow behavior remain unchanged; descriptive metadata fields may change. Reuse existing YAML helpers rather than adding a parser or abstraction. Compare prose with executable source; do not encode unsupported product inventory or future updater/qualification behavior.
 
 **Acceptance:**
 - [ ] Before RED, record the aligned task-start main SHA and re-read the current setup-wp action, freshness workflow, test/setup-wp.test.ts, test/freshness.test.ts, and test/workflow-shape.test.ts paths. If any embedded blueprint path, literal, or behavior differs, stop: update this typed blueprint to source, validate, and re-review before implementation; executable source wins.
@@ -127,10 +133,10 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 - [ ] README and action descriptions name source-derived configurable public webpresso/app-releases, tokenless direct URLs, and exact product semver independent from action SHA; no obsolete github-token/private-source claim remains.
 - [ ] The focused test derives the action-supported platform asset set from action selection logic and requires the README set to match exactly, including no extra invented platform asset. At refinement the set is wp-linux-x64, wp-linux-arm64, wp-darwin-x64, and wp-darwin-arm64; task-start source wins. The package-root name is likewise derived from PACKAGE_ROOT_ASSET and currently resolves to same-release wp-package-root.tgz with no source/tag-archive fallback.
 - [ ] Cache/download and integrity prose is derived from action source and ordering, never this plan alone. At refinement it states optional caller-supplied sha256 verification, version-directory tool-cache hits skip download, misses download directly, and seeding is best-effort; it must not claim rehash-on-hit, downloads on every invocation, or automatic provenance verification. Task-start source wins.
-- [ ] README and package-root input description match executable exports exactly: WEBPRESSO_PACKAGE_ROOT, legacy WEBPRESSO_AGENT_KIT_ROOT, and NODE_PATH; they reject removed WP_AGENT_KIT_PACKAGE_ROOT and state missing catalog fails closed. No executable export/failure behavior changes.
+- [ ] README and inputs.package-root.description match executable exports exactly: WEBPRESSO_PACKAGE_ROOT, legacy WEBPRESSO_AGENT_KIT_ROOT, and NODE_PATH; they reject removed WP_AGENT_KIT_PACKAGE_ROOT and state missing catalog fails closed. No executable export/failure behavior changes.
 - [ ] Setup-wp guidance states the action resolves neither ranges/latest nor self-update. Negative assertions are scoped to setup-wp version/source behavior and do not reject truthful npm latest-version wording in freshness guidance.
 - [ ] Freshness guidance names the source-derived workflow path, workflow display name, job display name, and exactly three npm pin shapes (environment assignment, shell default, composite agent-kit-version default), and states setup-wp's product-version input is excluded and the scanner is migration debt, not a wp installer/updater. At refinement literals are .github/workflows/webpresso-freshness.yml, Reusable webpresso freshness, and webpresso-freshness; source wins.
-- [ ] Diff scope is README.md, descriptive metadata only in .github/actions/setup-wp/action.yml, test/setup-wp-current-information.test.ts, and blueprint/review evidence. Action runs.steps and freshness workflow remain byte-unchanged; no external identifier, input key/default, pin, URL, asset selection, permission, trigger, cache, checksum, export, download, or installer behavior changes.
+- [ ] Diff scope is README.md, descriptive metadata only in .github/actions/setup-wp/action.yml, test/setup-wp-current-information.test.ts, and blueprint/review evidence. Action input keys/defaults/required flags, action runs.steps, and freshness workflow remain byte-unchanged; no external identifier, pin, URL, asset selection, permission, trigger, cache, checksum, export, download, or installer behavior changes.
 - [ ] The exact focused, setup-wp, freshness, and workflow-shape wp test commands in Promotion Gates pass; controller records the merge SHA.
 
 ## Trust Dossier
@@ -139,7 +145,7 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-08-23T20:29:15.702Z
+- verified-at: 2026-08-23T20:32:56.423Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -153,7 +159,8 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 | C5 | At refinement, freshness is .github/workflows/webpresso-freshness.yml, named Reusable webpresso freshness with job webpresso-freshness, scans three npm pin shapes, and excludes setup-wp's product axis. | repo:.github/workflows/webpresso-freshness.yml; repo:test/freshness.test.ts |
 | C6 | Existing suites lock current setup-wp executable behavior and freshness scanning behavior. | repo:test/setup-wp.test.ts; repo:test/freshness.test.ts |
 | C7 | The workflow-shape suite locks the freshness workflow path, callable triggers, and deliberate shared-toolchain exclusion. | repo:test/workflow-shape.test.ts |
-| C8 | README and setup-wp package-root description contain stale token, package-root source/export/failure, freshness filename, and pin-shape prose conflicting with executable source. | repo:README.md; repo:.github/actions/setup-wp/action.yml |
+| C8 | README and inputs.package-root.description contain stale token, package-root source, export, and failure prose that conflicts with executable source. | repo:README.md; repo:.github/actions/setup-wp/action.yml |
+| C9 | README alone contains the stale freshness filename and four-pin-shape guidance; current workflow and tests establish the replacement truth in C5. | repo:README.md |
 
 ### Material Decisions
 
