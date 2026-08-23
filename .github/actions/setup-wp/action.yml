@@ -26,12 +26,10 @@ inputs:
     default: ""
   package-root:
     description: >
-      Also install the wp package root (catalog + blueprint migrations) and
-      export WEBPRESSO_AGENT_KIT_ROOT / WP_AGENT_KIT_PACKAGE_ROOT / NODE_PATH.
-      Read from the SAME public release as the binary, so it needs no token and
-      no second version. Required by callers that run wp setup/sync/audit,
-      which resolve templates and migrations from disk -- `bun build --compile`
-      embeds no assets, so a bare binary cannot supply them.
+      Also install wp-package-root.tgz from the same public release as the
+      binary and export WEBPRESSO_PACKAGE_ROOT, legacy
+      WEBPRESSO_AGENT_KIT_ROOT, and NODE_PATH. Requires no token or second
+      version and fails closed when the extracted root has no catalog/.
     required: false
     default: "false"
 
