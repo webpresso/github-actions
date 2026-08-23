@@ -1,9 +1,9 @@
 ---
 type: blueprint
-title: "Correct setup-wp current information"
+title: Correct setup-wp current information
 status: draft
 complexity: S
-owner: "webpresso/github-actions"
+owner: webpresso/github-actions
 created: "2026-08-23"
 last_updated: "2026-08-23"
 progress: "0% (0/1 tasks done, 0 blocked)"
@@ -137,9 +137,9 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 
 ### Readiness Verdict
 
-- promotion-ready: false
+- promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-08-23T20:26:46.105Z
+- verified-at: 2026-08-23T20:29:15.702Z
 - trust-gate-version: v1
 
 ### Material Claims
