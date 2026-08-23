@@ -1,12 +1,12 @@
 ---
 type: blueprint
 title: "Correct setup-wp current information"
-status: draft
+status: planned
 complexity: S
 owner: "webpresso/github-actions"
 created: "2026-08-23"
 last_updated: "2026-08-23"
-progress: "0% (0/1 tasks done, 0 blocked)"
+progress: 0% (0/1 tasks done, 0 blocked, updated 2026-08-23)
 tags:
   - "setup-wp"
   - "release"
@@ -145,7 +145,7 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-08-23T20:32:56.423Z
+- verified-at: 2026-08-23T20:34:15.050Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -175,11 +175,11 @@ Preflight latest main and apply the Summary/D1 authority rule before RED. Write 
 
 | Gate | Command | Expected outcome | Last result | Defer |
 | --- | --- | --- | --- | --- |
-| Focused truth contract | wp test --files test/setup-wp-current-information.test.ts | README/action/freshness source-parity contract passes and proves corrected current claims. | deferred until implementation | pre-implementation |
-| setup-wp behavior regression | wp test --files test/setup-wp.test.ts | Existing setup-wp executable behavior suite passes unchanged. | deferred until implementation | pre-implementation |
-| Freshness behavior regression | wp test --files test/freshness.test.ts | Existing three-shape npm scanner and setup-wp exclusion suite passes unchanged. | deferred until implementation | pre-implementation |
-| Workflow-shape regression | wp test --files test/workflow-shape.test.ts | Existing workflow path, triggers, pins, and toolchain-boundary suite passes unchanged. | deferred until implementation | pre-implementation |
-| Touched-file format | wp format --check --files README.md .github/actions/setup-wp/action.yml test/setup-wp-current-information.test.ts | Touched README, action metadata, and focused test satisfy repository formatting. | deferred until implementation | pre-implementation |
+| Focused truth contract | wp test --files test/setup-wp-current-information.test.ts | README/action/freshness source-parity contract passes and proves corrected current claims. | deferred: pre-implementation (explicit defer marker) | pre-implementation |
+| setup-wp behavior regression | wp test --files test/setup-wp.test.ts | Existing setup-wp executable behavior suite passes unchanged. | deferred: pre-implementation (explicit defer marker) | pre-implementation |
+| Freshness behavior regression | wp test --files test/freshness.test.ts | Existing three-shape npm scanner and setup-wp exclusion suite passes unchanged. | deferred: pre-implementation (explicit defer marker) | pre-implementation |
+| Workflow-shape regression | wp test --files test/workflow-shape.test.ts | Existing workflow path, triggers, pins, and toolchain-boundary suite passes unchanged. | deferred: pre-implementation (explicit defer marker) | pre-implementation |
+| Touched-file format | wp format --check --files README.md .github/actions/setup-wp/action.yml test/setup-wp-current-information.test.ts | Touched README, action metadata, and focused test satisfy repository formatting. | deferred: pre-implementation (explicit defer marker) | pre-implementation |
 
 ### Residual Unknowns
 
