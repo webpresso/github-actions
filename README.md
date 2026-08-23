@@ -7,7 +7,7 @@ Current workflows:
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
 - `.github/workflows/changesets-release.yml`
-- `.github/workflows/agent-kit-freshness.yml`
+- `.github/workflows/webpresso-freshness.yml`
 - `.github/actions/setup-webpresso-toolchain/action.yml`
 - `.github/actions/wait-for-checks/action.yml`
 
@@ -42,16 +42,15 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
 wp install contract (`setup-wp`):
-- every reusable workflow invokes one immutable `setup-wp` action commit, hosted in this public repo so callers outside the `webpresso` GitHub org can resolve it (the equivalent action in the private source monorepo cannot be shared across organizations)
-- `setup-wp` takes a required `version` input — the caller supplies the exact wp release semver to install; the action does not self-resolve a version
-- the binary is downloaded from the **public** `webpresso/app-releases` repository by direct release-asset URL. There is no GitHub API call, no token, and no `python3` dependency on the runner; `github-token` is still accepted (so existing callers keep working) but no longer takes part in the install
-- the release line restarted at `0.0.1` when the private `webpresso/agent-kit` repository was renamed to `webpresso/app`, and `v0.0.2` is a byte-identical mirror of the last private `3.3.6` build. A caller still on the old `3.3.x` axis must move the `version` input onto the new line in the same commit that bumps the pinned `setup-wp` SHA — the two pins are only valid together
-- before downloading, the action short-circuits on the `@actions/tool-cache` layout: if `${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/<version>/<arch>/wp` is executable it goes straight onto `PATH`. Self-hosted images that bake wp in therefore never hit the network; GitHub-hosted runners miss and fall through to the download, which then seeds that same path best-effort
-- the cache is keyed on the version **directory**, never on `wp --version`: a standalone release binary reports the product axis from a package root it does not carry, so every published binary prints `0.0.0`. Nothing in a workflow may assert that `wp --version` equals the pinned version
-- an optional `checksum` input pins the sha256 of the downloaded asset for callers that want the binary bound as tightly as the action SHAs
+- every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
+- `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
+- binaries come from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
+- supported assets are exactly `wp-linux-x64`, `wp-linux-arm64`, `wp-darwin-x64`, and `wp-darwin-arm64`
+- a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification, then attempts a best-effort seed of that same cache path
+- the cache is keyed on the version directory, never on `wp --version`; a standalone binary cannot reliably identify its release version
 - `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- the agent-kit package root (`WEBPRESSO_AGENT_KIT_ROOT`, `WP_AGENT_KIT_PACKAGE_ROOT`, `NODE_PATH`) is **opt-in** via `package-root: true` and is off by default: the public release repository ships only the five `wp-*` binaries, and current binaries resolve their own catalog and migration assets. The opt-in path reads the private source monorepo, so it additionally needs `github-token` and an explicit `package-root-ref` (the private tag axis, e.g. `v3.3.6`, does not track the public `version`). A package root that lacks blueprint migrations now warns instead of failing the install
-- consumers update their reusable-workflow commit SHA and, independently, the pinned `version` input when they want a newer wp release
+- `package-root: true` additionally downloads `wp-package-root.tgz` from the same release and same version as the binary; it exports `WEBPRESSO_PACKAGE_ROOT`, legacy `WEBPRESSO_AGENT_KIT_ROOT`, and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
+- consumers update the reusable-workflow commit SHA and pinned product version independently
 
 ## Gating on test outcomes (`wait-for-checks`)
 
@@ -196,32 +195,20 @@ set `doppler_identity_id` and omit `ci_secret_provider_token`. To enable
 rollback, the caller's deploy block writes `release_id=<id>` to
 `$GITHUB_OUTPUT` and reads the provided `RELEASE_ID` in `rollback_command`.
 
-## agent-kit freshness (`agent-kit-freshness.yml`)
+## webpresso freshness (`webpresso-freshness.yml`)
 
-Consumers pin `@webpresso/agent-kit` in their own workflow YAML (an env
-assignment, a shell default, a `setup-wp` `with: version:` input, or a
-composite action's `agent-kit-version` input default), and those pins tend to
-go stale because nothing else in the ecosystem watches them — Renovate isn't
-installed on these orgs and Dependabot can't read a version out of arbitrary
-workflow YAML. This reusable workflow closes that gap: it resolves the latest
-published `@webpresso/agent-kit` version from npm, scans the calling repo's
-own `.github/**/*.yml`/`.yaml` files for the four known pin shapes, and opens
-(or updates) a single PR bumping every stale pin. If it finds *zero* pins in a
-repo that called it, it fails the run instead of passing silently — that's
-the signal that the pin shape drifted and the scan needs fixing, not a
-"nothing to do" result.
+`.github/workflows/webpresso-freshness.yml` is the reusable workflow named
+`Reusable webpresso freshness`; its single job is named `webpresso-freshness`.
+It resolves the latest published npm `@webpresso/agent-kit` version and scans
+exactly three npm pin shapes: an environment assignment, a shell default, and
+a composite `agent-kit-version` input default. The `setup-wp` product-version
+input is excluded because it uses the independent `webpresso/app-releases`
+axis. This scanner is migration debt for deprecated npm pins, not an installer
+or updater for `wp`.
 
 It runs entirely on the caller's own `GITHUB_TOKEN` (no PAT, no GitHub App) and
-never runs `wp setup`. It does not touch `setup-wp`'s exact-version install
-contract described above.
-
-⚠️ This workflow still resolves "latest" from the **npm** `@webpresso/agent-kit`
-version, which is no longer the axis `setup-wp` installs from: the binary now
-comes from the `webpresso/app-releases` release line that restarted at `0.0.1`.
-Until that resolver is repointed at the release line, do not schedule this
-workflow against a repository whose `setup-wp` `version:` input is on the new
-axis — it would "bump" a valid `0.0.x` pin to an npm version that has no
-published binary.
+never runs `wp setup`. It opens or updates one PR for stale npm pins and fails
+loudly when it finds zero recognized pins, which signals scanner drift.
 
 This is a **caller-scheduled reusable workflow**: it declares only
 `workflow_call` and `workflow_dispatch`, so it has no `schedule:` trigger of its
@@ -233,8 +220,8 @@ and the YAML cannot drift apart.
 Add a tiny caller workflow — this is where the schedule lives — to adopt it:
 
 ```yaml
-# .github/workflows/agent-kit-freshness.yml
-name: agent-kit freshness
+# .github/workflows/webpresso-freshness.yml
+name: webpresso freshness
 
 on:
   schedule:
@@ -247,7 +234,7 @@ permissions:
 
 jobs:
   freshness:
-    uses: webpresso/github-actions/.github/workflows/agent-kit-freshness.yml@<full-commit-sha>
+    uses: webpresso/github-actions/.github/workflows/webpresso-freshness.yml@<full-commit-sha>
 ```
 
 The caller workflow's own `permissions:` block above is required: a called
