@@ -37,11 +37,58 @@ jobs:
       - name: Contract tests
         run: bun test
 
+  # setup-vp falls back to the moving latest release for an unresolved catalog.
+  # Capture that value in its own job so the fixed valid routes can prove they
+  # did not silently take the same fallback.
+  setup-vp-fallback:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Write unresolved catalog fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > package.json <<'JSON'
+          {
+            "private": true,
+            "packageManager": "pnpm@10.18.2",
+            "devDependencies": {
+              "vite-plus": "catalog:missing"
+            }
+          }
+          JSON
+          cat > pnpm-workspace.yaml <<'YAML'
+          catalogs:
+            vp:
+              vite-plus: 0.1.1
+          YAML
+          printf "lockfileVersion: '9.0'\n" > pnpm-lock.yaml
+
+      - uses: ./.github/actions/setup-webpresso-toolchain
+        with:
+          package-manager-cache: false
+
+      - id: version
+        name: Capture fallback Vite+ version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(vp --version | sed -nE 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n 1)"
+          if [[ -z "${version}" ]]; then
+            echo "::error::could not parse fallback Vite+ version"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   # These hosted runner cases exercise the public composite consumers use. The
   # fixture matrix is deliberately non-default: a success must come from the
   # caller manifest/catalog + lockfile, not setup-vp's latest fallback.
   setup-vp-resolution:
-    needs: contract-tests
+    needs: setup-vp-fallback
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -51,8 +98,6 @@ jobs:
             expected_version: "0.1.0"
           - fixture: named-catalog
             expected_version: "0.1.1"
-          - fixture: unresolved-named-catalog
-            expected_version: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -104,16 +149,6 @@ jobs:
                   version: 0.1.1
           YAML
               ;;
-            unresolved-named-catalog)
-              sed -i.bak 's/PLACEHOLDER/catalog:missing/' package.json
-              rm package.json.bak
-              cat > pnpm-workspace.yaml <<'YAML'
-          catalogs:
-            vp:
-              vite-plus: 0.1.1
-          YAML
-              printf "lockfileVersion: '9.0'\n" > pnpm-lock.yaml
-              ;;
             *)
               echo "::error::unknown fixture ${FIXTURE}"
               exit 1
@@ -121,29 +156,25 @@ jobs:
           esac
 
       - id: toolchain
-        continue-on-error: ${{ matrix.fixture == 'unresolved-named-catalog' }}
         uses: ./.github/actions/setup-webpresso-toolchain
+        with:
+          package-manager-cache: false
 
       - name: Assert setup-vp resolution outcome
-        if: ${{ always() }}
         shell: bash
         env:
           EXPECTED_VERSION: ${{ matrix.expected_version }}
+          FALLBACK_VERSION: ${{ needs.setup-vp-fallback.outputs.version }}
           FIXTURE: ${{ matrix.fixture }}
           OUTCOME: ${{ steps.toolchain.outcome }}
         run: |
           set -euo pipefail
-          if [[ "${FIXTURE}" == "unresolved-named-catalog" ]]; then
-            if [[ "${OUTCOME}" != "failure" ]]; then
-              echo "::error::setup-vp accepted unresolved catalog:missing"
-              exit 1
-            fi
-            echo "::notice::unresolved-named-catalog rejected"
-            exit 0
-          fi
-
           if [[ "${OUTCOME}" != "success" ]]; then
             echo "::error::setup-vp failed ${FIXTURE}: ${OUTCOME}"
+            exit 1
+          fi
+          if [[ -z "${FALLBACK_VERSION}" || "${EXPECTED_VERSION}" == "${FALLBACK_VERSION}" ]]; then
+            echo "::error::${FIXTURE} does not differ from the captured fallback ${FALLBACK_VERSION}"
             exit 1
           fi
           actual="$(vp --version)"
@@ -172,7 +203,7 @@ jobs:
           set -euo pipefail
           expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
           mkdir -p "$(dirname "${expected}")"
-          : > "${expected}"
+          printf '#!/bin/sh\nprintf "WP_PARTIAL_CACHE_POISON\\n" >&2\nexit 42\n' > "${expected}"
           chmod 0644 "${expected}"
           if [[ -x "${expected}" ]]; then
             echo "::error::partial fixture is unexpectedly executable"
@@ -192,6 +223,10 @@ jobs:
             echo "::error::setup-wp did not safely reseed ${expected}"
             exit 1
           fi
+          if grep -q "WP_PARTIAL_CACHE_POISON" "${expected}"; then
+            echo "::error::setup-wp did not replace the partial cache payload"
+            exit 1
+          fi
           "${expected}" --help >/dev/null
           tar -C "${RUNNER_TOOL_CACHE}" -czf "${RUNNER_TEMP}/setup-wp-cache.tgz" "wp/${WP_VERSION}"
 
@@ -200,6 +235,7 @@ jobs:
           name: setup-wp-cache
           path: ${{ runner.temp }}/setup-wp-cache.tgz
           if-no-files-found: error
+          retention-days: 1
 
   setup-wp-cache-hit:
     needs: setup-wp-cache-seed

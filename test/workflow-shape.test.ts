@@ -573,20 +573,27 @@ describe("toolchain exceptions", () => {
   it("self-test.yml qualifies manifest/catalog resolution and a fresh-runner setup-wp cache hit", () => {
     const workflow = loadYaml(WORKFLOW_SELF_TEST);
     const jobs = asRecord(dig(workflow, "jobs"), "self-test jobs");
+    const fallback = asRecord(jobs["setup-vp-fallback"], "setup-vp-fallback job");
     const resolution = asRecord(jobs["setup-vp-resolution"], "setup-vp-resolution job");
     const seed = asRecord(jobs["setup-wp-cache-seed"], "setup-wp-cache-seed job");
     const hit = asRecord(jobs["setup-wp-cache-hit"], "setup-wp-cache-hit job");
 
-    expect(dig(resolution, "needs")).toBe("contract-tests");
+    expect(dig(fallback, "needs")).toBe("contract-tests");
+    expect(dig(fallback, "outputs", "version")).toBe("${{ steps.version.outputs.version }}");
+    const fallbackSteps = stepsOf(fallback);
+    const fallbackToolchain = fallbackSteps.find((step) => usesOfStep(step) === "./.github/actions/setup-webpresso-toolchain");
+    expect(dig(fallbackToolchain, "with", "package-manager-cache")).toBe(false);
+    expect(digString(fallbackSteps.find((step) => step["id"] === "version"), "run")).toContain("vp --version");
+
+    expect(dig(resolution, "needs")).toBe("setup-vp-fallback");
     expect(dig(resolution, "strategy", "matrix", "include")).toStrictEqual([
       { fixture: "manifest-range", expected_version: "0.1.0" },
       { fixture: "named-catalog", expected_version: "0.1.1" },
-      { fixture: "unresolved-named-catalog", expected_version: "" },
     ]);
     const resolutionSteps = stepsOf(resolution);
     const toolchain = resolutionSteps.find((step) => step["id"] === "toolchain");
     expect(usesOfStep(toolchain ?? {})).toBe("./.github/actions/setup-webpresso-toolchain");
-    expect(dig(toolchain, "continue-on-error")).toBe("${{ matrix.fixture == 'unresolved-named-catalog' }}");
+    expect(dig(toolchain, "with", "package-manager-cache")).toBe(false);
 
     const actionSteps = stepsOf(dig(loadYaml(ACTION_TOOLCHAIN), "runs"));
     const setupVp = actionSteps.find(
@@ -615,8 +622,19 @@ describe("toolchain exceptions", () => {
     expect(dig(hitSetup, "with", "version")).toBe("${{ env.WP_VERSION }}");
     expect(dig(hitSetup, "with", "release-repo")).toBe("webpresso/does-not-exist");
 
+    const resolutionVerify = resolutionSteps.find((step) => step["name"] === "Assert setup-vp resolution outcome");
+    expect(dig(resolutionVerify, "env", "FALLBACK_VERSION")).toBe("${{ needs.setup-vp-fallback.outputs.version }}");
+    expect(digString(resolutionVerify, "run")).toContain('"${EXPECTED_VERSION}" == "${FALLBACK_VERSION}"');
+
     const seedVerify = seedSteps.find((step) => step["name"] === "Verify reseed and archive the exact cache subtree");
     const hitVerify = hitSteps.find((step) => step["name"] === "Verify the fresh runner cache hit");
+    const partial = seedSteps.find((step) => step["name"] === "Create a partial cache entry");
+    const upload = seedSteps.find(
+      (step) => usesOfStep(step) === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    );
+    expect(digString(partial, "run")).toContain("WP_PARTIAL_CACHE_POISON");
+    expect(digString(seedVerify, "run")).toContain("WP_PARTIAL_CACHE_POISON");
+    expect(dig(upload, "with", "retention-days")).toBe(1);
     expect(digString(seedVerify, "run")).toContain('"${expected}" --help >/dev/null');
     expect(digString(hitVerify, "run")).toContain('"${expected}" --help >/dev/null');
     expect(digString(hitVerify, "run")).toContain('"${WP_INSTALL_DIR}" != "$(dirname "${expected}")"');
