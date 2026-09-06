@@ -37,6 +37,215 @@ jobs:
       - name: Contract tests
         run: bun test
 
+  # These hosted runner cases exercise the public composite consumers use. The
+  # fixture matrix is deliberately non-default: a success must come from the
+  # caller manifest/catalog + lockfile, not setup-vp's latest fallback.
+  setup-vp-resolution:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fixture: manifest-range
+            expected_version: "0.1.0"
+          - fixture: named-catalog
+            expected_version: "0.1.1"
+          - fixture: unresolved-named-catalog
+            expected_version: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Write caller fixture
+        shell: bash
+        env:
+          FIXTURE: ${{ matrix.fixture }}
+        run: |
+          set -euo pipefail
+          cat > package.json <<'JSON'
+          {
+            "private": true,
+            "packageManager": "pnpm@10.18.2",
+            "devDependencies": {
+              "vite-plus": "PLACEHOLDER"
+            }
+          }
+          JSON
+
+          case "${FIXTURE}" in
+            manifest-range)
+              sed -i.bak 's/PLACEHOLDER/^0.1.0/' package.json
+              rm package.json.bak
+              cat > pnpm-lock.yaml <<'YAML'
+          lockfileVersion: '9.0'
+          importers:
+            .:
+              devDependencies:
+                vite-plus:
+                  specifier: ^0.1.0
+                  version: 0.1.0
+          YAML
+              ;;
+            named-catalog)
+              sed -i.bak 's/PLACEHOLDER/catalog:vp/' package.json
+              rm package.json.bak
+              cat > pnpm-workspace.yaml <<'YAML'
+          catalogs:
+            vp:
+              vite-plus: 0.1.1
+          YAML
+              cat > pnpm-lock.yaml <<'YAML'
+          lockfileVersion: '9.0'
+          importers:
+            .:
+              devDependencies:
+                vite-plus:
+                  specifier: catalog:vp
+                  version: 0.1.1
+          YAML
+              ;;
+            unresolved-named-catalog)
+              sed -i.bak 's/PLACEHOLDER/catalog:missing/' package.json
+              rm package.json.bak
+              cat > pnpm-workspace.yaml <<'YAML'
+          catalogs:
+            vp:
+              vite-plus: 0.1.1
+          YAML
+              printf "lockfileVersion: '9.0'\n" > pnpm-lock.yaml
+              ;;
+            *)
+              echo "::error::unknown fixture ${FIXTURE}"
+              exit 1
+              ;;
+          esac
+
+      - id: toolchain
+        continue-on-error: ${{ matrix.fixture == 'unresolved-named-catalog' }}
+        uses: ./.github/actions/setup-webpresso-toolchain
+
+      - name: Assert setup-vp resolution outcome
+        if: ${{ always() }}
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ matrix.expected_version }}
+          FIXTURE: ${{ matrix.fixture }}
+          OUTCOME: ${{ steps.toolchain.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${FIXTURE}" == "unresolved-named-catalog" ]]; then
+            if [[ "${OUTCOME}" != "failure" ]]; then
+              echo "::error::setup-vp accepted unresolved catalog:missing"
+              exit 1
+            fi
+            echo "::notice::unresolved-named-catalog rejected"
+            exit 0
+          fi
+
+          if [[ "${OUTCOME}" != "success" ]]; then
+            echo "::error::setup-vp failed ${FIXTURE}: ${OUTCOME}"
+            exit 1
+          fi
+          actual="$(vp --version)"
+          if [[ "${actual}" != *"${EXPECTED_VERSION}"* ]]; then
+            echo "::error::expected ${FIXTURE} to resolve ${EXPECTED_VERSION}, got ${actual}"
+            exit 1
+          fi
+
+  # A partial cache entry is reseeded from the public release, then transferred
+  # to a fresh runner. The hit job has no seed-job PATH or env state to reuse.
+  setup-wp-cache-seed:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    env:
+      WP_VERSION: "0.0.6"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure writable runner cache
+        shell: bash
+        run: echo "RUNNER_TOOL_CACHE=${RUNNER_TEMP}/setup-wp-tool-cache" >> "${GITHUB_ENV}"
+
+      - name: Create a partial cache entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          mkdir -p "$(dirname "${expected}")"
+          : > "${expected}"
+          chmod 0644 "${expected}"
+          if [[ -x "${expected}" ]]; then
+            echo "::error::partial fixture is unexpectedly executable"
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-wp
+        with:
+          version: ${{ env.WP_VERSION }}
+
+      - name: Verify reseed and archive the exact cache subtree
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          if [[ ! -x "${expected}" ]]; then
+            echo "::error::setup-wp did not safely reseed ${expected}"
+            exit 1
+          fi
+          "${expected}" --help >/dev/null
+          tar -C "${RUNNER_TOOL_CACHE}" -czf "${RUNNER_TEMP}/setup-wp-cache.tgz" "wp/${WP_VERSION}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: setup-wp-cache
+          path: ${{ runner.temp }}/setup-wp-cache.tgz
+          if-no-files-found: error
+
+  setup-wp-cache-hit:
+    needs: setup-wp-cache-seed
+    runs-on: ubuntu-latest
+    env:
+      WP_VERSION: "0.0.6"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure writable runner cache
+        shell: bash
+        run: echo "RUNNER_TOOL_CACHE=${RUNNER_TEMP}/setup-wp-tool-cache" >> "${GITHUB_ENV}"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: setup-wp-cache
+          path: ${{ runner.temp }}/setup-wp-seed
+
+      - name: Restore the seeded cache into this fresh runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TOOL_CACHE}"
+          tar -xzf "${RUNNER_TEMP}/setup-wp-seed/setup-wp-cache.tgz" -C "${RUNNER_TOOL_CACHE}"
+          test -x "${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+
+      - uses: ./.github/actions/setup-wp
+        with:
+          version: ${{ env.WP_VERSION }}
+          release-repo: webpresso/does-not-exist
+
+      - name: Verify the fresh runner cache hit
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          if [[ "${WP_INSTALL_DIR}" != "$(dirname "${expected}")" ]]; then
+            echo "::error::setup-wp did not publish the cache install directory"
+            exit 1
+          fi
+          if [[ "$(command -v wp)" != "${expected}" ]]; then
+            echo "::error::setup-wp did not publish the cache executable"
+            exit 1
+          fi
+          "${expected}" --help >/dev/null
+
   # The contract suite proves the wait-for-checks polling program against a
   # mocked API. These two jobs prove the composite against the REAL check-runs
   # API on this very commit: one commit, one green check, one name that cannot
