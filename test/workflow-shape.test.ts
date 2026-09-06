@@ -346,7 +346,7 @@ describe("shared toolchain wiring", () => {
   it("the shared toolchain action uses catalog-aware Vite+ setup", () => {
     const action = loadYaml(ACTION_TOOLCHAIN);
     const setupVp = stepsOf(dig(action, "runs")).find(
-      (step) => usesOfStep(step) === "voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb",
+      (step) => usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
     );
 
     expect(setupVp).toBeDefined();
