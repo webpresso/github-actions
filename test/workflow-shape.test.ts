@@ -108,7 +108,7 @@ describe("deploy workflow bootstrap contract", () => {
       expect(dig(workflowCallInputs(workflow), "checkout_ref", "default")).toBe("");
 
       const checkout = allSteps(workflow).find(
-        (step) => usesOfStep(step) === "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        (step) => usesOfStep(step) === "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       );
       expect(checkout, path).toBeDefined();
       expect(dig(checkout, "with", "ref")).toBe("${{ inputs.checkout_ref || github.sha }}");
@@ -306,11 +306,35 @@ describe("shared toolchain wiring", () => {
   it("the shared toolchain action is fully pinned", () => {
     const action = loadYaml(ACTION_TOOLCHAIN);
     expect(dig(action, "runs", "using")).toBe("composite");
-    const usesValues = extractUses(stepsOf(dig(action, "runs")));
-    expect(usesValues).toContain("pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093");
-    expect(usesValues).toContain("actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444");
-    expect(usesValues).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    const inputs = asRecord(dig(action, "inputs"), "toolchain inputs");
+    const steps = stepsOf(dig(action, "runs"));
+    const usesValues = extractUses(steps);
+    expect(digString(inputs["node-version"], "default")).toBe("24.20.0");
+    expect(digString(inputs["bun-version"], "default")).toBe("1.4.2");
+    expect(usesValues).toContain("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413");
+    expect(usesValues).toContain("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020");
     expect(usesValues).toContain("oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6");
+
+    const cacheEnabledSetup = steps.find(
+      (step) => digString(step, "if") === "${{ inputs.package-manager-cache != 'false' }}",
+    );
+    expect(cacheEnabledSetup === undefined ? undefined : usesOfStep(cacheEnabledSetup)).toBe(
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    );
+    expect(dig(cacheEnabledSetup, "with", "cache")).toBe("${{ inputs.package-manager-cache }}");
+
+    const cacheDisabledSetup = steps.find(
+      (step) => digString(step, "if") === "${{ inputs.package-manager-cache == 'false' }}",
+    );
+    expect(cacheDisabledSetup === undefined ? undefined : usesOfStep(cacheDisabledSetup)).toBe(
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    );
+    expect(dig(cacheDisabledSetup, "with", "package-manager-cache")).toBe(false);
+
+    const setupBun = steps.find(
+      (step) => usesOfStep(step) === "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+    );
+    expect(dig(setupBun, "with", "bun-version")).toBe("${{ inputs.bun-version }}");
     for (const value of usesValues) {
       if (value.startsWith("./")) {
         continue;
@@ -385,6 +409,9 @@ describe("shared toolchain wiring", () => {
 });
 
 describe("pin consistency", () => {
+  // First-party action references are immutable reviewed merge SHAs. This
+  // repository intentionally has no tags; these shape and cross-reference
+  // checks do not establish tag provenance (which applies to third-party pins).
   // The setup-wp SHA, the toolchain SHA, and the agent-kit version each live at
   // many irreducible YAML sites. Asserting literals here would make this file
   // one more site every freshness bump has to edit, so the expectation is
@@ -474,10 +501,10 @@ describe("repo-wide pin and prose contracts", () => {
     expect(dig(inputs, "install_command", "type")).toBe("string");
     expect(dig(inputs, "security_command", "type")).toBe("string");
     expect(stepUses(WORKFLOW_SECURITY)).toContain(
-      "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7",
+      "gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e",
     );
     expect(stepUses(WORKFLOW_SECURITY)).toContain(
-      "google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2",
+      "google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67",
     );
     expect(stepUses(WORKFLOW_SECURITY)).toContain(SETUP_TOOLCHAIN_USES);
   });

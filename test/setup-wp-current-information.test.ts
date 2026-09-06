@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   ACTION_SETUP_WP,
+  ACTION_TOOLCHAIN,
   README_PATH,
   WORKFLOW_WEBPRESSO_FRESHNESS,
   asRecord,
@@ -11,13 +12,15 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const FRESHNESS_SHA256 = "bba32c456674db528686108c703432bd93eba20b5252b29c633e4269c6a784a6";
-const ACTION_BEHAVIOR_SHA256 = "04e8d5569bec90f93e58f041e7cb8d387c8888434ad50bfbd6a579e51b49bf57";
+const FRESHNESS_SHA256 = "3ca9d1652f61900048af4628de555a557f326fda34023e3c13a6639275d78ff2";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "04e8d5569bec90f93e58f041e7cb8d387c8888434ad50bfbd6a579e51b49bf57";
+const ACTION_BEHAVIOR_SHA256 = "edd5eff38818f5a386906f2090513212626c6c1d8e69c9680418936e835e7640";
 
 const readme = readRepoFile(README_PATH);
 const actionText = readRepoFile(ACTION_SETUP_WP);
 const freshnessText = readRepoFile(WORKFLOW_WEBPRESSO_FRESHNESS);
 const action = loadYaml(ACTION_SETUP_WP);
+const toolchainAction = loadYaml(ACTION_TOOLCHAIN);
 const freshness = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
 const inputs = asRecord(dig(action, "inputs"), "setup-wp inputs");
 const steps = (() => {
@@ -138,6 +141,9 @@ describe("setup-wp current information", () => {
     expect(createHash("sha256").update(freshnessText).digest("hex")).toBe(FRESHNESS_SHA256);
     expect(
       createHash("sha256").update(JSON.stringify(withoutDescriptions(action))).digest("hex"),
+    ).toBe(SETUP_WP_ACTION_BEHAVIOR_SHA256);
+    expect(
+      createHash("sha256").update(JSON.stringify(withoutDescriptions(toolchainAction))).digest("hex"),
     ).toBe(ACTION_BEHAVIOR_SHA256);
   });
 });

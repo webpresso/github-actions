@@ -155,7 +155,7 @@ jobs:
           # ephemeral merge commit and carries zero check runs.
           ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
 
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
 
@@ -166,7 +166,7 @@ jobs:
           version: "0.0.6"
 
       - name: Install Doppler CLI
-        uses: DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4
+        uses: DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Validate committed secret profile and sink
         id: secret_config
