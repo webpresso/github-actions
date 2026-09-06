@@ -569,4 +569,75 @@ describe("toolchain exceptions", () => {
     expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
     expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
   });
+
+  it("self-test.yml qualifies manifest/catalog resolution and a fresh-runner setup-wp cache hit", () => {
+    const workflow = loadYaml(WORKFLOW_SELF_TEST);
+    const jobs = asRecord(dig(workflow, "jobs"), "self-test jobs");
+    const fallback = asRecord(jobs["setup-vp-fallback"], "setup-vp-fallback job");
+    const resolution = asRecord(jobs["setup-vp-resolution"], "setup-vp-resolution job");
+    const seed = asRecord(jobs["setup-wp-cache-seed"], "setup-wp-cache-seed job");
+    const hit = asRecord(jobs["setup-wp-cache-hit"], "setup-wp-cache-hit job");
+
+    expect(dig(fallback, "needs")).toBe("contract-tests");
+    expect(dig(fallback, "outputs", "version")).toBe("${{ steps.version.outputs.version }}");
+    const fallbackSteps = stepsOf(fallback);
+    const fallbackToolchain = fallbackSteps.find((step) => usesOfStep(step) === "./.github/actions/setup-webpresso-toolchain");
+    expect(dig(fallbackToolchain, "with", "package-manager-cache")).toBe(false);
+    expect(digString(fallbackSteps.find((step) => step["id"] === "version"), "run")).toContain("vp --version");
+
+    expect(dig(resolution, "needs")).toBe("setup-vp-fallback");
+    expect(dig(resolution, "strategy", "matrix", "include")).toStrictEqual([
+      { fixture: "manifest-range", expected_version: "0.1.0" },
+      { fixture: "named-catalog", expected_version: "0.1.1" },
+    ]);
+    const resolutionSteps = stepsOf(resolution);
+    const toolchain = resolutionSteps.find((step) => step["id"] === "toolchain");
+    expect(usesOfStep(toolchain ?? {})).toBe("./.github/actions/setup-webpresso-toolchain");
+    expect(dig(toolchain, "with", "package-manager-cache")).toBe(false);
+
+    const actionSteps = stepsOf(dig(loadYaml(ACTION_TOOLCHAIN), "runs"));
+    const setupVp = actionSteps.find(
+      (step) => usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
+    );
+    expect(dig(setupVp, "with", "run-install")).toBe(false);
+    expect(dig(setupVp, "with", "version")).toBeUndefined();
+    expect(dig(setupVp, "with", "working-directory")).toBeUndefined();
+
+    expect(dig(seed, "needs")).toBe("contract-tests");
+    expect(dig(hit, "needs")).toBe("setup-wp-cache-seed");
+    expect(dig(seed, "env", "WP_VERSION")).toBe(SETUP_WP_VERSION);
+    expect(dig(hit, "env", "WP_VERSION")).toBe(SETUP_WP_VERSION);
+
+    const seedSteps = stepsOf(seed);
+    const hitSteps = stepsOf(hit);
+    const cacheConfig = 'echo "RUNNER_TOOL_CACHE=${RUNNER_TEMP}/setup-wp-tool-cache" >> "${GITHUB_ENV}"';
+    expect(seedSteps.find((step) => step["name"] === "Configure writable runner cache")?.["run"]).toBe(cacheConfig);
+    expect(hitSteps.find((step) => step["name"] === "Configure writable runner cache")?.["run"]).toBe(cacheConfig);
+    expect(extractUses(seedSteps)).toContain("./.github/actions/setup-wp");
+    expect(extractUses(seedSteps)).toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+    expect(extractUses(hitSteps)).toContain("./.github/actions/setup-wp");
+    expect(extractUses(hitSteps)).toContain("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093");
+
+    const hitSetup = hitSteps.find((step) => usesOfStep(step) === "./.github/actions/setup-wp");
+    expect(dig(hitSetup, "with", "version")).toBe("${{ env.WP_VERSION }}");
+    expect(dig(hitSetup, "with", "release-repo")).toBe("webpresso/does-not-exist");
+
+    const resolutionVerify = resolutionSteps.find((step) => step["name"] === "Assert setup-vp resolution outcome");
+    expect(dig(resolutionVerify, "env", "FALLBACK_VERSION")).toBe("${{ needs.setup-vp-fallback.outputs.version }}");
+    expect(digString(resolutionVerify, "run")).toContain('"${EXPECTED_VERSION}" == "${FALLBACK_VERSION}"');
+
+    const seedVerify = seedSteps.find((step) => step["name"] === "Verify reseed and archive the exact cache subtree");
+    const hitVerify = hitSteps.find((step) => step["name"] === "Verify the fresh runner cache hit");
+    const partial = seedSteps.find((step) => step["name"] === "Create a partial cache entry");
+    const upload = seedSteps.find(
+      (step) => usesOfStep(step) === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    );
+    expect(digString(partial, "run")).toContain("WP_PARTIAL_CACHE_POISON");
+    expect(digString(seedVerify, "run")).toContain("WP_PARTIAL_CACHE_POISON");
+    expect(dig(upload, "with", "retention-days")).toBe(1);
+    expect(digString(seedVerify, "run")).toContain('"${expected}" --help >/dev/null');
+    expect(digString(hitVerify, "run")).toContain('"${expected}" --help >/dev/null');
+    expect(digString(hitVerify, "run")).toContain('"${WP_INSTALL_DIR}" != "$(dirname "${expected}")"');
+    expect(digString(hitVerify, "run")).toContain('"$(command -v wp)" != "${expected}"');
+  });
 });
