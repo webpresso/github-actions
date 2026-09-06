@@ -119,7 +119,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@58c397a0d88eb8b9d723b41f45139b896fb592b6
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@27883b9b05dd721c848524dd816cc7c9103276f0
         with:
           package-manager-cache: "false"
 
