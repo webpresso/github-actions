@@ -21,6 +21,10 @@ it as data — pins, permission scopes, secret-sink boundaries, and the embedded
 workflow scripts (which are extracted from their heredocs and executed against
 real git fixtures).
 
+### Toolchain
+
+`.tool-versions` is the single pin source for this repo's toolchain; mise and asdf read it natively.
+
 **Prerequisite:** [Bun](https://bun.sh) >= 1.2 (for `Bun.YAML`). **Command:**
 
 ```bash
