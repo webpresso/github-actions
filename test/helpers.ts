@@ -33,6 +33,8 @@ export const WORKFLOW_RELEASE = join(WORKFLOWS_DIR, "changesets-release.yml");
 export const WORKFLOW_SECURITY = join(WORKFLOWS_DIR, "webpresso-security.yml");
 export const WORKFLOW_WEBPRESSO_FRESHNESS = join(WORKFLOWS_DIR, "webpresso-freshness.yml");
 export const WORKFLOW_SELF_TEST = join(WORKFLOWS_DIR, "self-test.yml");
+export const WORKFLOW_PR_POLICY = join(WORKFLOWS_DIR, "pr-policy.yml");
+export const WORKFLOW_AUTO_MERGE_SWEEPER = join(WORKFLOWS_DIR, "auto-merge-sweeper.yml");
 export const ACTION_TOOLCHAIN = join(ACTIONS_DIR, "setup-webpresso-toolchain", "action.yml");
 export const ACTION_SETUP_WP = join(ACTIONS_DIR, "setup-wp", "action.yml");
 export const ACTION_WAIT_FOR_CHECKS = join(ACTIONS_DIR, "wait-for-checks", "action.yml");
@@ -78,10 +80,17 @@ export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/a
  * against the repo itself and is never called by a consumer. Installing the
  * shared toolchain for a Bun test run would be pure scope creep too. Its own
  * contract is `self-test.yml gates the contract suite`.
+ *
+ * pr-policy.yml and auto-merge-sweeper.yml are org-governance workflows run
+ * directly (by an org ruleset and by a schedule), not called by a consumer.
+ * They install neither pnpm nor Vite+; pr-policy pins the released wp binary by
+ * SHA-256 itself. Their contracts live in `org-governance.test.ts`.
  */
 export const NON_TOOLCHAIN_WORKFLOWS: readonly string[] = [
   WORKFLOW_WEBPRESSO_FRESHNESS,
   WORKFLOW_SELF_TEST,
+  WORKFLOW_PR_POLICY,
+  WORKFLOW_AUTO_MERGE_SWEEPER,
 ];
 
 /* -------------------------------------------------------------------------- */

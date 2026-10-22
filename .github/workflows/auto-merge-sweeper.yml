@@ -1,0 +1,151 @@
+name: Auto-merge sweeper
+
+# Arms squash auto-merge on eligible open pull requests across the organization,
+# as the Webpresso Internal App. Auto-merge enabled with GITHUB_TOKEN starts no
+# push workflows on the merge, so release and deploy on the default branch
+# would silently not run; an App identity does start them. Logic and its
+# contract: .github/scripts/auto-merge-sweeper.mjs.
+#
+# A pull request is armed only when it is non-draft, targets the default
+# branch, has its head in the same repository, and its author's effective
+# permission is write, maintain or admin (read from the collaborator-permission
+# API; unreadable means not armed), and it has no `webpresso:no-automerge`
+# label. At most 3 are newly armed per repository per sweep (already-armed PRs
+# do not count), oldest first, and only in repositories whose `webpresso-governance` property is full
+# or guarded.
+#
+# There is deliberately no pull_request trigger. Scheduled runs always use the
+# default branch's copy of this file and script. A workflow_dispatch run uses
+# whatever ref the dispatcher picks, so the job `if` requires refs/heads/main:
+# a branch copy of the script must never run with the Internal App credentials.
+# The job never checks out or executes PR code; it reads PR metadata through
+# the API only.
+#
+# Kill switch, off by default: the scheduled sweep runs only when the org
+# variable WP_AUTO_MERGE_SWEEP is `on`. Unset, empty or any other value means
+# stopped, so merging this file arms nothing until the variable is set (or
+# disable this workflow in the Actions tab). A workflow_dispatch run arms
+# exactly one repository and ignores the org switch, so it can be verified while
+# the switch is off.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository to sweep, as owner/name (ignores WP_AUTO_MERGE_SWEEP)
+        type: string
+        required: true
+      dry_run:
+        description: Plan only; report what would be armed without arming
+        type: boolean
+        default: false
+
+permissions: {}
+
+# One sweep at a time. A newer pending run replaces an older pending one; the
+# running one finishes.
+concurrency:
+  group: auto-merge-sweeper
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Sweep auto-merge
+    if: >-
+      github.repository == 'webpresso/github-actions' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || vars.WP_AUTO_MERGE_SWEEP == 'on')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the sweeper script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/auto-merge-sweeper.mjs
+          sparse-checkout-cone-mode: false
+
+      # The Webpresso Internal App credentials come from Doppler (project
+      # webpresso, config prd) through the read-only CI_RELEASE_SECRET_PROVIDER_TOKEN,
+      # per the provider-token-only contract. `inject-env-vars` is deliberately
+      # NOT set: values stay step outputs.
+      - name: Fetch Webpresso Internal App credentials from Doppler
+        id: doppler
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
+        with:
+          doppler-token: ${{ secrets.CI_RELEASE_SECRET_PROVIDER_TOKEN }}
+
+      # Doppler values are ordinary step outputs, outside GitHub's automatic
+      # `secrets.*` masking; register whole value then line by line so the
+      # multi-line App private-key PEM cannot reach a log unmasked. Values
+      # reach the script only through `env:`; nothing is written to disk.
+      - name: Register fetched credentials for log masking
+        shell: bash
+        env:
+          WEBPRESSO_INTERNAL_APP_CLIENT_ID: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_CLIENT_ID }}
+          WEBPRESSO_INTERNAL_APP_PRIVATE_KEY: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          escape_command_value() {
+            local value="$1"
+            value="${value//%/%25}"
+            value="${value//$'\r'/%0D}"
+            value="${value//$'\n'/%0A}"
+            printf '%s' "$value"
+          }
+          for name in \
+            WEBPRESSO_INTERNAL_APP_CLIENT_ID \
+            WEBPRESSO_INTERNAL_APP_PRIVATE_KEY
+          do
+            value="${!name:-}"
+            [ -n "${value}" ] || continue
+            printf '::add-mask::%s\n' "$(escape_command_value "${value}")"
+            while IFS= read -r line; do
+              [ -n "${line}" ] || continue
+              printf '::add-mask::%s\n' "$(escape_command_value "${line}")"
+            done <<< "${value}"
+          done
+
+      # Fail closed with the missing NAMES before the mint step can fail
+      # obscurely. Names only, never values.
+      - name: Require Webpresso Internal App secrets
+        shell: bash
+        env:
+          WEBPRESSO_INTERNAL_APP_CLIENT_ID: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_CLIENT_ID }}
+          WEBPRESSO_INTERNAL_APP_PRIVATE_KEY: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${WEBPRESSO_INTERNAL_APP_CLIENT_ID:-}" ] || missing+=(WEBPRESSO_INTERNAL_APP_CLIENT_ID)
+          [ -n "${WEBPRESSO_INTERNAL_APP_PRIVATE_KEY:-}" ] || missing+=(WEBPRESSO_INTERNAL_APP_PRIVATE_KEY)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing Webpresso Internal App credentials in Doppler project webpresso, config prd (names only): ${missing[*]}"
+            exit 1
+          fi
+
+      # Scoped to the organization's installed repositories and to what arming
+      # and the governance-property read need.
+      - name: Mint Webpresso Internal App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_CLIENT_ID }}
+          private-key: ${{ steps.doppler.outputs.WEBPRESSO_INTERNAL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-organization-custom-properties: read
+
+      - name: Arm eligible pull requests
+        env:
+          SWEEP_TOKEN: ${{ steps.app-token.outputs.token }}
+          SWEEP_API_URL: ${{ github.api_url }}
+          SWEEP_GRAPHQL_URL: ${{ github.graphql_url }}
+          SWEEP_OWNER: ${{ github.repository_owner }}
+          SWEEP_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.repository || '' }}
+          SWEEP_SWITCH: ${{ vars.WP_AUTO_MERGE_SWEEP }}
+          SWEEP_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: node .github/scripts/auto-merge-sweeper.mjs

@@ -1,0 +1,57 @@
+{
+  "repositories": [
+    {
+      "fullName": "webpresso/sandbox",
+      "level": "full",
+      "defaultBranch": "main",
+      "permissions": {
+        "alice": { "permission": "write", "role_name": "write" },
+        "maint": { "permission": "write", "role_name": "maintain" },
+        "reader": { "permission": "read", "role_name": "read" },
+        "triager": { "permission": "read", "role_name": "triage" },
+        "ghost": "error"
+      },
+      "pullRequests": [
+        { "id": "PR_6", "number": 6, "isDraft": false, "createdAt": "2026-10-06T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_1", "number": 1, "isDraft": false, "createdAt": "2026-10-01T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_2", "number": 2, "isDraft": true, "createdAt": "2026-10-02T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_3", "number": 3, "isDraft": false, "createdAt": "2026-10-03T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/sandbox", "labels": ["webpresso:no-automerge"], "autoMergeEnabled": false },
+        { "id": "PR_4", "number": 4, "isDraft": false, "createdAt": "2026-10-04T00:00:00Z", "baseRefName": "main", "author": "reader", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_5", "number": 5, "isDraft": false, "createdAt": "2026-10-05T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "outsider/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_7", "number": 7, "isDraft": false, "createdAt": "2026-10-07T00:00:00Z", "baseRefName": "release", "author": "alice", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_8", "number": 8, "isDraft": false, "createdAt": "2026-10-08T00:00:00Z", "baseRefName": "main", "author": "ghost", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_9", "number": 9, "isDraft": false, "createdAt": "2026-10-09T00:00:00Z", "baseRefName": "main", "author": "maint", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_10", "number": 10, "isDraft": false, "createdAt": "2026-10-10T00:00:00Z", "baseRefName": "main", "author": "triager", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false },
+        { "id": "PR_11", "number": 11, "isDraft": false, "createdAt": "2026-10-11T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/sandbox", "labels": [], "autoMergeEnabled": false }
+      ]
+    },
+    {
+      "fullName": "webpresso/notes",
+      "level": "off",
+      "defaultBranch": "main",
+      "permissions": { "alice": { "permission": "write", "role_name": "write" } },
+      "pullRequests": [
+        { "id": "PR_N1", "number": 1, "isDraft": false, "createdAt": "2026-10-01T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/notes", "labels": [], "autoMergeEnabled": false }
+      ]
+    },
+    {
+      "fullName": "webpresso/app",
+      "level": "self",
+      "defaultBranch": "main",
+      "permissions": { "alice": { "permission": "write", "role_name": "write" } },
+      "pullRequests": [
+        { "id": "PR_A1", "number": 1, "isDraft": false, "createdAt": "2026-10-01T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/app", "labels": [], "autoMergeEnabled": false }
+      ]
+    },
+    {
+      "fullName": "webpresso/guarded-repo",
+      "level": "guarded",
+      "defaultBranch": "main",
+      "permissions": { "alice": { "permission": "write", "role_name": "write" } },
+      "pullRequests": [
+        { "id": "PR_G1", "number": 1, "isDraft": false, "createdAt": "2026-10-01T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/guarded-repo", "labels": [], "autoMergeEnabled": true },
+        { "id": "PR_G2", "number": 2, "isDraft": false, "createdAt": "2026-10-02T00:00:00Z", "baseRefName": "main", "author": "alice", "headRepository": "webpresso/guarded-repo", "labels": [], "autoMergeEnabled": false }
+      ]
+    }
+  ]
+}

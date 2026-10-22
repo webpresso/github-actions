@@ -1,0 +1,183 @@
+name: PR Policy
+
+# The shared wp PR gates (AI/model disclosure and blueprint coverage), evaluated
+# by the released, checksum-pinned wp binary and tiered by the repository's
+# `webpresso-governance` custom property. An organization `workflows` ruleset
+# requires this workflow from refs/heads/main of this repository, so a pull
+# request cannot weaken it or satisfy the gate with a job of the same name. The
+# PR is checked out as inert data: nothing from it is installed or executed, and
+# wp runs from a clean directory outside the checkout (pointed at it with
+# --root), so no config or file in the PR is picked up from the working
+# directory.
+# Tiers and the replay expectation: docs/pr-policy.md.
+#
+# The pull request is resolved the same way for both triggers, because a
+# merge_group event carries no pull_request payload: only the queue's temporary
+# ref gh-readonly-queue/<base>/pr-<N>-<sha>. Its PR number is parsed from that
+# ref and the PR's live state is read from the API. The merge group's base_sha
+# is never used: it is unlanded queue state.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# A cancelled run never passes, and the newest run for the PR decides.
+concurrency:
+  group: pr-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: PR Policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Fails closed on anything it cannot prove. Event values reach the script
+      # only through `env:`; everything it writes to GITHUB_OUTPUT is validated
+      # to be a single line first.
+      - name: Resolve the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          QUEUE_BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: |
+          set -euo pipefail
+          expected_base=''
+          if [ "$EVENT_NAME" = merge_group ]; then
+            base_branch="${QUEUE_BASE_REF#refs/heads/}"
+            prefix="refs/heads/gh-readonly-queue/${base_branch}/pr-"
+            if [ "$base_branch" = "$QUEUE_BASE_REF" ] || [ -z "$base_branch" ] || [[ "$QUEUE_HEAD_REF" != "$prefix"* ]]; then
+              echo "::error::'${QUEUE_HEAD_REF}' is not a merge-queue ref for '${QUEUE_BASE_REF}'"
+              exit 1
+            fi
+            suffix="${QUEUE_HEAD_REF#"$prefix"}"
+            if [[ ! "$suffix" =~ ^([1-9][0-9]{0,9})-([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+              echo "::error::Cannot parse a pull request number from '${QUEUE_HEAD_REF}'"
+              exit 1
+            fi
+            number="${BASH_REMATCH[1]}"
+            expected_base="$base_branch"
+          else
+            number="$EVENT_PR_NUMBER"
+          fi
+          if [[ ! "$number" =~ ^[1-9][0-9]{0,9}$ ]]; then
+            echo "::error::No pull request number for this ${EVENT_NAME} event"
+            exit 1
+          fi
+
+          # The state the PR has now, not the one frozen into the event, so a
+          # body fixed after the last push passes on rerun.
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}" > "$RUNNER_TEMP/pr.json"
+          if ! jq -e --argjson number "$number" --arg base "$expected_base" '
+              def line: type == "string" and length > 0 and (test("[\\n\\r]") | not);
+              .number == $number
+              and ($base == "" or (.state == "open" and .base.ref == $base))
+              and (.base.sha | type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$"))
+              and (.head.ref | line)
+              and (.user.login | line)
+              and (.body == null or (.body | type == "string"))
+            ' "$RUNNER_TEMP/pr.json" > /dev/null; then
+            echo "::error::Pull request #${number} is not a well-formed pull request for this ${EVENT_NAME} event"
+            exit 1
+          fi
+          jq -r '.body // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-body.md"
+          {
+            echo "number=${number}"
+            echo "author=$(jq -r '.user.login' "$RUNNER_TEMP/pr.json")"
+            echo "head_ref=$(jq -r '.head.ref' "$RUNNER_TEMP/pr.json")"
+            echo "base_sha=$(jq -r '.base.sha' "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+      # D10 mapping. `off` is not governed and passes with a reason; a missing
+      # or unknown value (including `self`, which runs its own source-built
+      # policy and is excluded from the workflows rule) fails closed.
+      - name: Read the governance tier
+        id: tier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          level="$(gh api "repos/${GITHUB_REPOSITORY}/properties/values" \
+            --jq '[.[] | select(.property_name == "webpresso-governance") | .value][0] // ""')"
+          case "$level" in
+            full | guarded)
+              echo "level=${level}" >> "$GITHUB_OUTPUT"
+              echo "Governance tier: ${level}"
+              ;;
+            off)
+              echo "level=off" >> "$GITHUB_OUTPUT"
+              echo "Not governed: webpresso-governance is off for ${GITHUB_REPOSITORY}, so every gate is skipped."
+              echo "PR Policy passed without gates: not governed (webpresso-governance=off)." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            '')
+              echo "::error::The custom property webpresso-governance is not set on ${GITHUB_REPOSITORY}. Set it to full, guarded or off."
+              exit 1
+              ;;
+            *)
+              echo "::error::The custom property webpresso-governance has unknown value '${level}' on ${GITHUB_REPOSITORY}. Allowed here: full, guarded, off."
+              exit 1
+              ;;
+          esac
+      - name: Install pinned wp
+        if: ${{ steps.tier.outputs.level == 'full' || steps.tier.outputs.level == 'guarded' }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --output /tmp/wp-linux-x64 \
+            https://github.com/webpresso/app-releases/releases/download/v0.0.13/wp-linux-x64
+          printf '%s  %s\n' \
+            2d9c17dac7174a1b1436a7f5cb32719cb1fad9591850d8481dcf156b28415874 \
+            /tmp/wp-linux-x64 | sha256sum --check --strict -
+          sudo install -m 0755 /tmp/wp-linux-x64 /usr/local/bin/wp
+      - name: Check out the pull request as data
+        if: ${{ steps.tier.outputs.level == 'full' || steps.tier.outputs.level == 'guarded' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/pull/${{ steps.pr.outputs.number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+          path: pr
+      # fetch-depth 0 brings every branch, and the base commit is on the
+      # default branch, which cannot be force-pushed. If it is ever missing,
+      # rerun the job; a persistent failure means its history was rewritten.
+      - name: Confirm the base commit is present
+        if: ${{ steps.tier.outputs.level == 'full' || steps.tier.outputs.level == 'guarded' }}
+        working-directory: pr
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: git cat-file -e "${BASE_SHA}^{commit}"
+      - name: Validate the AI/model disclosure
+        if: ${{ steps.tier.outputs.level == 'full' || steps.tier.outputs.level == 'guarded' }}
+        working-directory: ${{ runner.temp }}
+        env:
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        run: >-
+          wp pr validate-description
+          --body-file "$RUNNER_TEMP/pr-body.md"
+          --author "$PR_AUTHOR"
+          --head-ref "$PR_HEAD_REF"
+      - name: Require blueprint coverage
+        if: ${{ steps.tier.outputs.level == 'full' }}
+        working-directory: ${{ runner.temp }}
+        env:
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          merge_base="$(git -C "$GITHUB_WORKSPACE/pr" merge-base "$BASE_SHA" HEAD)"
+          echo "Merge base: ${merge_base}"
+          wp audit blueprint-pr-coverage \
+            --root "$GITHUB_WORKSPACE/pr" \
+            --base "$merge_base" \
+            --head-ref "$PR_HEAD_REF" \
+            --pr-author "$PR_AUTHOR"
