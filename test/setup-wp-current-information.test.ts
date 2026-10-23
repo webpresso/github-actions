@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 
 const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "7cc24562bdd020390449e004127ce33e015aea7dd0f97431b82337fe8ac213f4";
-const ACTION_BEHAVIOR_SHA256 = "49a8edf41c6a9992244340c54e9e4dca67862bdf150c0dfaf6dfa34f49daa0a2";
+const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
 const actionText = readRepoFile(ACTION_SETUP_WP);

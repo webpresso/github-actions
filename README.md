@@ -40,7 +40,7 @@ preinstalled on GitHub-hosted runners and on any normal dev machine.
 every push to `main`, so a broken contract cannot merge green.
 
 Shared toolchain action (`setup-webpresso-toolchain`):
-- resolves the caller's pnpm version from `package.json` and configures pnpm, Node.js, Corepack, Vite+, and (optionally) Bun
+- installs the caller's pnpm (from `package.json#packageManager`, read by `pnpm/action-setup`) and configures Node.js, Vite+, and (optionally) Bun
 - installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
