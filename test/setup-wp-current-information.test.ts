@@ -13,7 +13,7 @@ import {
 } from "./helpers.ts";
 
 const FRESHNESS_SHA256 = "3ca9d1652f61900048af4628de555a557f326fda34023e3c13a6639275d78ff2";
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "04e8d5569bec90f93e58f041e7cb8d387c8888434ad50bfbd6a579e51b49bf57";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "dd54ce2b972bae6f4d39b7f01f304777a3c6e78dc97c5013e3a81b52b45534e7";
 const ACTION_BEHAVIOR_SHA256 = "49a8edf41c6a9992244340c54e9e4dca67862bdf150c0dfaf6dfa34f49daa0a2";
 
 const readme = readRepoFile(README_PATH);
@@ -28,8 +28,15 @@ const steps = (() => {
   if (!Array.isArray(value)) throw new Error("expected setup-wp runs.steps");
   return value.map((step, index) => asRecord(step, `setup-wp runs.steps[${index}]`));
 })();
-const installScript = digString(steps[0], "run") ?? "";
-const packageRootScript = digString(steps[1], "run") ?? "";
+function stepNamed(name: string): Record<string, unknown> {
+  const found = steps.find((candidate) => candidate["name"] === name);
+  if (!found) throw new Error(`expected a setup-wp step named '${name}'`);
+  return found;
+}
+const installScript = digString(stepNamed("Install wp binary from the public release repository"), "run") ?? "";
+const archiveScript = digString(stepNamed("Install wp from its verified release archive"), "run") ?? "";
+const packageRootStep = stepNamed("Install wp package root");
+const packageRootScript = digString(packageRootStep, "run") ?? "";
 const wpSection = readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ?? "";
 const freshnessSection = readme.split("## webpresso freshness")[1] ?? "";
 
@@ -66,7 +73,7 @@ describe("setup-wp current information", () => {
       "wp-linux-arm64",
       "wp-linux-x64",
     ]);
-    const packageRootAsset = digString(steps[1], "env", "PACKAGE_ROOT_ASSET");
+    const packageRootAsset = digString(packageRootStep, "env", "PACKAGE_ROOT_ASSET");
     expect(packageRootAsset).toBe("wp-package-root.tgz");
 
     for (const asset of [...binaryAssets, packageRootAsset]) {
@@ -135,6 +142,22 @@ describe("setup-wp current information", () => {
     expect(freshnessSection).toMatch(/migration debt.*not an installer\s+or updater/isu);
     expect(readme).not.toInclude("agent-kit-freshness.yml");
     expect(freshnessSection).not.toMatch(/four known pin shapes/iu);
+  });
+
+  it("M7 documents the archive-era install for 0.0.14 and later", () => {
+    expect(archiveScript).toInclude('archive="wp-${target}.tar.gz"');
+    expect(archiveScript).toInclude('"${archive}.json"');
+    expect(archiveScript).toInclude("self install --from");
+    expect(archiveScript).toInclude("self activate");
+    expect(archiveScript).not.toInclude("api.github.com");
+
+    expect(wpSection).toMatch(/0\.0\.14/u);
+    expect(wpSection).toInclude("wp-<target>.tar.gz");
+    expect(wpSection).toInclude("wp self install --from");
+    expect(wpSection).toInclude("wp self activate");
+    expect(wpSection).toMatch(/versions\/<v>\/bin/u);
+    expect(wpSection).toInclude("WEBPRESSO_HOME");
+    expect(wpSection).toMatch(/package-root.*no-op/isu);
   });
 
   it("action and freshness behavior boundary", () => {

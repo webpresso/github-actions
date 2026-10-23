@@ -49,6 +49,14 @@ wp install contract (`setup-wp`):
 - every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
 - `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
 - binaries come from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
+- releases from `0.0.14` on publish install archives instead of a bare binary: `wp-<target>.tar.gz` plus its `wp-<target>.tar.gz.json` digest sidecar, for `linux-x64`, `linux-arm64`, `darwin-x64` and `darwin-arm64`. For those releases, `setup-wp`:
+  - downloads both assets by direct release-asset URL (`release-host` overrides `https://github.com` for a mirror);
+  - applies the optional caller-supplied sha256 to the archive and checks the archive against the sidecar;
+  - runs the archive's own `wp self install --from` into `WEBPRESSO_HOME` (`$RUNNER_TOOL_CACHE/webpresso`, or the job temp directory when the tool cache is not writable). wp verifies every file against the archive manifest, and the staged `wp --version`, before it publishes the immutable `versions/<v>/`.
+- an already-installed archive version is re-verified by `wp self activate <v>` (receipt, manifest, staged version) without downloading anything; a fresh install is activated the same way
+- for archive releases `PATH` gets that version's own `versions/<v>/bin` rather than the shared `bin/wp` link, so concurrent jobs pinning different versions on one runner cannot redirect each other, and `WEBPRESSO_HOME` is exported for later steps
+- for archive releases `package-root: true` is a no-op with a notice: the package root ships inside the archive, and those binaries ignore `WEBPRESSO_PACKAGE_ROOT`
+- releases before `0.0.14` keep the bare-binary install described below
 - supported assets are exactly `wp-linux-x64`, `wp-linux-arm64`, `wp-darwin-x64`, and `wp-darwin-arm64`
 - a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification, then attempts a best-effort seed of that same cache path
 - the cache is keyed on the version directory, never on `wp --version`; a standalone binary cannot reliably identify its release version

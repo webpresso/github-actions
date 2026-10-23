@@ -147,3 +147,47 @@ jobs:
           fi
 
           echo "bounded wait failed in ${elapsed}s and reported: ${STATES}"
+
+  # The contract suite proves setup-wp's archive path against a fake wp. This
+  # job proves it against the REAL first archive release on both supported
+  # runner OSes: the archive's own wp installs it into the tool-cache home, and
+  # the installed binary reports the pinned version and a healthy layout.
+  setup-wp-archive-smoke:
+    needs: contract-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-wp
+        with:
+          version: "0.0.14"
+
+      - name: Assert the pinned version is installed and healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          printed="$(wp --version)"
+          if [[ "${printed}" != *"0.0.14"* ]]; then
+            echo "::error::expected wp 0.0.14, got '${printed}'"
+            exit 1
+          fi
+          case "$(command -v wp)" in
+            "${WEBPRESSO_HOME}/versions/0.0.14/bin/wp") ;;
+            *) echo "::error::wp resolves to $(command -v wp), not the pinned version directory"; exit 1 ;;
+          esac
+          status="$(wp self status --json)"
+          echo "${status}"
+          if ! grep -Eq '"healthy"[[:space:]]*:[[:space:]]*true' <<<"${status}"; then
+            echo "::error::installed wp is not healthy"
+            exit 1
+          fi
+
+      - name: Re-run setup-wp on the same runner (installed-version path)
+        uses: ./.github/actions/setup-wp
+        with:
+          version: "0.0.14"

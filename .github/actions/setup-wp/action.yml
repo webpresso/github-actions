@@ -1,9 +1,9 @@
 name: Setup global wp
 description: >
-  Put a caller-pinned wp release binary on PATH. Prefers a wp already baked into
-  the runner's @actions/tool-cache layout; otherwise downloads the published
-  binary from the PUBLIC webpresso/app-releases repository -- no GitHub API
-  call, no token, no python3.
+  Put a caller-pinned wp release on PATH from the PUBLIC webpresso/app-releases
+  repository -- no GitHub API call, no token, no python3. Releases from 0.0.14
+  on ship verified install archives that wp installs into its own immutable
+  versioned layout; earlier releases ship a bare binary, installed as before.
 
 inputs:
   version:
@@ -17,11 +17,20 @@ inputs:
       webpresso/app-releases; override only to install from a mirror.
     required: false
     default: webpresso/app-releases
+  release-host:
+    description: >
+      Base URL serving `<release-repo>/releases/download/v<version>/<asset>`
+      for install-archive releases (0.0.14 on). Defaults to
+      https://github.com; override only for a mirror.
+    required: false
+    default: https://github.com
   checksum:
     description: >
-      Optional sha256 of the downloaded binary. When set, the download is
-      verified against it and the action fails on a mismatch. Ignored on a
-      tool-cache hit (that binary was provisioned by the runner image).
+      Optional sha256 of the downloaded asset: the bare binary before 0.0.14,
+      the wp-<target>.tar.gz install archive from 0.0.14 on. When set, the
+      download is verified against it and the action fails on a mismatch. A
+      bare-binary tool-cache hit skips it (that binary was provisioned by the
+      runner image); an installed archive version is re-verified by wp itself.
     required: false
     default: ""
   package-root:
@@ -30,13 +39,42 @@ inputs:
       binary and export WEBPRESSO_PACKAGE_ROOT, legacy
       WEBPRESSO_AGENT_KIT_ROOT, and NODE_PATH. Requires no token or second
       version and fails closed when the extracted root has no catalog/.
+      Releases from 0.0.14 on carry their package root inside the install
+      archive and ignore WEBPRESSO_PACKAGE_ROOT, so there it is a no-op.
     required: false
     default: "false"
 
 runs:
   using: composite
   steps:
+    - name: Classify the pinned wp release
+      id: era
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! "${WP_VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)([+-][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::setup-wp 'version' must be exact semver, got '${WP_VERSION}'"
+          exit 2
+        fi
+
+        # 0.0.14 is the first release whose assets are install archives
+        # (wp-<target>.tar.gz plus a .json digest sidecar) instead of a bare
+        # wp-<target> binary and wp-package-root.tgz. A prerelease of 0.0.14
+        # already ships archives, so the prerelease suffix is ignored here.
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+        patch="${BASH_REMATCH[3]}"
+        if (( major > 0 || minor > 0 || patch >= 14 )); then
+          echo "archive=true" >> "${GITHUB_OUTPUT}"
+        else
+          echo "archive=false" >> "${GITHUB_OUTPUT}"
+        fi
+
     - name: Install wp binary from the public release repository
+      if: ${{ steps.era.outputs.archive != 'true' }}
       shell: bash
       env:
         WP_VERSION: ${{ inputs.version }}
@@ -127,8 +165,120 @@ runs:
         echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
         echo "setup-wp: installed wp ${WP_VERSION} (${asset}) to ${install_dir}"
 
+    - name: Install wp from its verified release archive
+      if: ${{ steps.era.outputs.archive == 'true' }}
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.version }}
+        WP_RELEASE_REPO: ${{ inputs.release-repo }}
+        WP_RELEASE_HOST: ${{ inputs.release-host }}
+        WP_CHECKSUM: ${{ inputs.checksum }}
+      run: |
+        set -euo pipefail
+
+        os="$(uname -s)"
+        arch="$(uname -m)"
+        case "${os}/${arch}" in
+          Linux/x86_64|Linux/amd64)   target="linux-x64" ;;
+          Linux/aarch64|Linux/arm64)  target="linux-arm64" ;;
+          Darwin/x86_64)              target="darwin-x64" ;;
+          Darwin/arm64)               target="darwin-arm64" ;;
+          *)
+            echo "::error::unsupported runner platform '${os}/${arch}'"
+            exit 3
+            ;;
+        esac
+
+        sha256_of() {
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$1" | cut -d' ' -f1
+          else
+            shasum -a 256 "$1" | cut -d' ' -f1
+          fi
+        }
+
+        # wp owns the layout: versions/<v>/ is immutable once installed, and
+        # every install verifies the archive digest, each extracted file against
+        # the archive manifest, and the staged `wp --version` before publishing
+        # the version. The tool cache keeps that home across jobs on one runner;
+        # a read-only tool cache falls back to the job's temp directory.
+        home="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/webpresso"
+        if ! mkdir -p "${home}" 2>/dev/null || [[ ! -w "${home}" ]]; then
+          home="${RUNNER_TEMP:-/tmp}/webpresso-home"
+          mkdir -p "${home}"
+        fi
+        export WEBPRESSO_HOME="${home}"
+        pinned="${home}/versions/${WP_VERSION}/bin/wp"
+
+        if [[ -x "${pinned}" ]]; then
+          echo "setup-wp: wp ${WP_VERSION} is already installed in ${home}"
+        else
+          bundle="${RUNNER_TEMP:-/tmp}/webpresso-wp-bundle-${WP_VERSION}"
+          rm -rf "${bundle}"
+          mkdir -p "${bundle}"
+          archive="wp-${target}.tar.gz"
+          base="${WP_RELEASE_HOST}/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"
+          for asset in "${archive}" "${archive}.json"; do
+            # -L is mandatory: GitHub 302s release assets to a signed host.
+            if ! curl -fsSL --retry 3 --retry-delay 2 -o "${bundle}/${asset}" "${base}/${asset}"; then
+              echo "::error::download failed for ${base}/${asset} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${asset}?"
+              exit 6
+            fi
+          done
+
+          # A truncated or HTML body is not an archive; the real ones are tens of MB.
+          size="$(wc -c < "${bundle}/${archive}" | tr -d ' ')"
+          if [[ "${size}" -lt 1048576 ]]; then
+            echo "::error::downloaded ${archive} is only ${size} bytes; not a wp install archive"
+            exit 4
+          fi
+
+          actual="$(sha256_of "${bundle}/${archive}")"
+          if [[ -n "${WP_CHECKSUM}" && "${actual}" != "${WP_CHECKSUM}" ]]; then
+            echo "::error::sha256 mismatch for ${archive}: expected ${WP_CHECKSUM}, got ${actual}"
+            exit 5
+          fi
+          # The sidecar travels with the archive, so it proves integrity of the
+          # transfer, not origin; origin is the caller's `checksum`. wp checks
+          # the sidecar again during install; failing here names the asset.
+          recorded="$(sed -n 's/^[[:space:]]*"sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' "${bundle}/${archive}.json" | head -n 1)"
+          if [[ "${recorded}" != "${actual}" ]]; then
+            echo "::error::${archive} does not match its ${archive}.json sidecar (sidecar ${recorded:-missing}, archive ${actual})"
+            exit 7
+          fi
+
+          # The archive's own wp performs the install; nothing else is trusted
+          # to lay out the version directory.
+          scratch="$(mktemp -d "${RUNNER_TEMP:-/tmp}/webpresso-wp-extract.XXXXXX")"
+          tar -xzf "${bundle}/${archive}" -C "${scratch}" bin/wp
+          "${scratch}/bin/wp" self install --from "${bundle}" --no-activate
+          rm -rf "${scratch}" "${bundle}"
+          echo "setup-wp: installed wp ${WP_VERSION} (${target}) into ${home}"
+        fi
+
+        # Activation re-verifies the installed version (receipt, manifest, and a
+        # staged `--version`), so a cache hit is checked as strictly as a fresh
+        # install. PATH names the pinned version's own directory rather than
+        # the shared `bin/wp` link, so concurrent jobs on one runner that pin
+        # different versions cannot redirect each other.
+        "${pinned}" self activate "${WP_VERSION}"
+
+        echo "${home}/versions/${WP_VERSION}/bin" >> "${GITHUB_PATH}"
+        {
+          echo "WEBPRESSO_HOME=${home}"
+          echo "WP_INSTALL_DIR=${home}/versions/${WP_VERSION}/bin"
+        } >> "${GITHUB_ENV}"
+
+    - name: Note the package-root no-op for archive releases
+      if: ${{ inputs.package-root == 'true' && steps.era.outputs.archive == 'true' }}
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.version }}
+      run: |
+        echo "::notice::setup-wp: package-root has no effect for wp ${WP_VERSION}; its package root ships inside the install archive. Drop the input."
+
     - name: Install wp package root
-      if: ${{ inputs.package-root == 'true' }}
+      if: ${{ inputs.package-root == 'true' && steps.era.outputs.archive != 'true' }}
       shell: bash
       env:
         WP_VERSION: ${{ inputs.version }}
