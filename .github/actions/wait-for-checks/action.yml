@@ -91,11 +91,9 @@ runs:
         # `gh` is not a safe common denominator -- some consumers run on
         # self-hosted runners whose image ships neither the GitHub CLI nor jq,
         # and this action must work as the very first step of a job, before any
-        # tool-setup action has run. `node` is already this repository's
-        # established runner-side scripting runtime (setup-webpresso-toolchain
-        # invokes bare `node` in its first step, before actions/setup-node), it
-        # is preinstalled on GitHub-hosted images and required by the Actions
-        # runner itself, and it gives real JSON handling for the disambiguation
+        # tool-setup action has run. `node` is preinstalled on GitHub-hosted
+        # images and required by the Actions runner itself, and it gives real
+        # JSON handling for the disambiguation
         # logic below -- which is not something to write in jq filters.
         #
         # The program is written to a file rather than piped on stdin so the
