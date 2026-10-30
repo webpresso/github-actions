@@ -7,7 +7,6 @@ Current workflows:
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
 - `.github/workflows/changesets-release.yml`
-- `.github/workflows/webpresso-freshness.yml`
 - `.github/actions/setup-webpresso-toolchain/action.yml`
 - `.github/actions/wait-for-checks/action.yml`
 
@@ -53,7 +52,7 @@ wp install contract (`setup-wp`):
 - a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification, then attempts a best-effort seed of that same cache path
 - the cache is keyed on the version directory, never on `wp --version`; a standalone binary cannot reliably identify its release version
 - `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- `package-root: true` additionally downloads `wp-package-root.tgz` from the same release and same version as the binary; it exports `WEBPRESSO_PACKAGE_ROOT`, legacy `WEBPRESSO_AGENT_KIT_ROOT`, and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
+- `package-root: true` additionally downloads `wp-package-root.tgz` from the same release and same version as the binary; it exports `WEBPRESSO_PACKAGE_ROOT` and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
 - consumers update the reusable-workflow commit SHA and pinned product version independently
 
 ## Gating on test outcomes (`wait-for-checks`)
@@ -198,50 +197,3 @@ enforces the same contract again at execution time. Callers using Doppler OIDC
 set `doppler_identity_id` and omit `ci_secret_provider_token`. To enable
 rollback, the caller's deploy block writes `release_id=<id>` to
 `$GITHUB_OUTPUT` and reads the provided `RELEASE_ID` in `rollback_command`.
-
-## webpresso freshness (`webpresso-freshness.yml`)
-
-`.github/workflows/webpresso-freshness.yml` is the reusable workflow named
-`Reusable webpresso freshness`; its single job is named `webpresso-freshness`.
-It resolves the latest published npm `@webpresso/agent-kit` version and scans
-exactly three npm pin shapes: an environment assignment, a shell default, and
-a composite `agent-kit-version` input default. The `setup-wp` product-version
-input is excluded because it uses the independent `webpresso/app-releases`
-axis. This scanner is migration debt for deprecated npm pins, not an installer
-or updater for `wp`.
-
-It runs entirely on the caller's own `GITHUB_TOKEN` (no PAT, no GitHub App) and
-never runs `wp setup`. It opens or updates one PR for stale npm pins and fails
-loudly when it finds zero recognized pins, which signals scanner drift.
-
-This is a **caller-scheduled reusable workflow**: it declares only
-`workflow_call` and `workflow_dispatch`, so it has no `schedule:` trigger of its
-own. The cadence lives in the caller's workflow. (Adding a `schedule:` here
-would scan *this* library instead of the consumer repository, which is not what
-the workflow is for.) A contract test pins that trigger set so this description
-and the YAML cannot drift apart.
-
-Add a tiny caller workflow — this is where the schedule lives — to adopt it:
-
-```yaml
-# .github/workflows/webpresso-freshness.yml
-name: webpresso freshness
-
-on:
-  schedule:
-    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
-  workflow_dispatch: {}
-
-permissions:
-  contents: write
-  pull-requests: write
-
-jobs:
-  freshness:
-    uses: webpresso/github-actions/.github/workflows/webpresso-freshness.yml@<full-commit-sha>
-```
-
-The caller workflow's own `permissions:` block above is required: a called
-reusable workflow can narrow the caller's token but never elevate it, so
-without `contents: write` and `pull-requests: write` here the called job
-cannot push the bump branch or open the PR.

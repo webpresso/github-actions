@@ -27,9 +27,9 @@ inputs:
   package-root:
     description: >
       Also install wp-package-root.tgz from the same public release as the
-      binary and export WEBPRESSO_PACKAGE_ROOT, legacy
-      WEBPRESSO_AGENT_KIT_ROOT, and NODE_PATH. Requires no token or second
-      version and fails closed when the extracted root has no catalog/.
+      binary and export WEBPRESSO_PACKAGE_ROOT and NODE_PATH. Requires no
+      token or second version and fails closed when the extracted root has
+      no catalog/. Requires wp >= 0.0.5.
     required: false
     default: "false"
 
@@ -137,6 +137,14 @@ runs:
       run: |
         set -euo pipefail
 
+        # wp <= 0.0.4 located the package root only through a retired env
+        # name this step no longer exports, so those binaries cannot find it.
+        IFS=. read -r major minor patch <<< "${WP_VERSION%%[+-]*}"
+        if (( major == 0 && minor == 0 && patch < 5 )); then
+          echo "::error::package-root: true requires wp >= 0.0.5, got '${WP_VERSION}'"
+          exit 12
+        fi
+
         # One source, one version, no credential: the package root ships as an
         # asset on the SAME public release as the binary it belongs to.
         #
@@ -199,19 +207,17 @@ runs:
           fi
         fi
 
-        # Node module layout so createRequire(cwd).resolve() keeps working for
-        # binaries that predate WEBPRESSO_AGENT_KIT_ROOT.
+        # Node module layout so createRequire(cwd).resolve() keeps working.
+        # wp still falls back to resolving the package root by its retired
+        # module name (installedAppPackageRoot in webpresso/app), so the link
+        # name stays until app drops that fallback.
         modules_root="${RUNNER_TEMP:-/tmp}/webpresso-node-modules"
         mkdir -p "${modules_root}/@webpresso"
         rm -rf "${modules_root}/@webpresso/agent-kit"
         ln -s "${package_root}" "${modules_root}/@webpresso/agent-kit"
 
         {
-          # Current name. wp reads this and nothing else.
           echo "WEBPRESSO_PACKAGE_ROOT=${package_root}"
-          # Retired spelling, exported ONLY for wp binaries already published
-          # against it (<= 0.0.4). Delete once no supported release reads it.
-          echo "WEBPRESSO_AGENT_KIT_ROOT=${package_root}"
           echo "NODE_PATH=${modules_root}${NODE_PATH:+:${NODE_PATH}}"
         } >> "${GITHUB_ENV}"
         echo "package root: ${WP_RELEASE_REPO} v${WP_VERSION} (public, tokenless)"

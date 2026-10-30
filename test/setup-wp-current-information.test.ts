@@ -4,7 +4,6 @@ import {
   ACTION_SETUP_WP,
   ACTION_TOOLCHAIN,
   README_PATH,
-  WORKFLOW_WEBPRESSO_FRESHNESS,
   asRecord,
   dig,
   digString,
@@ -12,16 +11,13 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const FRESHNESS_SHA256 = "3ca9d1652f61900048af4628de555a557f326fda34023e3c13a6639275d78ff2";
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "04e8d5569bec90f93e58f041e7cb8d387c8888434ad50bfbd6a579e51b49bf57";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "7cc24562bdd020390449e004127ce33e015aea7dd0f97431b82337fe8ac213f4";
 const ACTION_BEHAVIOR_SHA256 = "49a8edf41c6a9992244340c54e9e4dca67862bdf150c0dfaf6dfa34f49daa0a2";
 
 const readme = readRepoFile(README_PATH);
 const actionText = readRepoFile(ACTION_SETUP_WP);
-const freshnessText = readRepoFile(WORKFLOW_WEBPRESSO_FRESHNESS);
 const action = loadYaml(ACTION_SETUP_WP);
 const toolchainAction = loadYaml(ACTION_TOOLCHAIN);
-const freshness = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
 const inputs = asRecord(dig(action, "inputs"), "setup-wp inputs");
 const steps = (() => {
   const value = dig(action, "runs", "steps");
@@ -31,7 +27,6 @@ const steps = (() => {
 const installScript = digString(steps[0], "run") ?? "";
 const packageRootScript = digString(steps[1], "run") ?? "";
 const wpSection = readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ?? "";
-const freshnessSection = readme.split("## webpresso freshness")[1] ?? "";
 
 function withoutDescriptions(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutDescriptions);
@@ -92,11 +87,7 @@ describe("setup-wp current information", () => {
     const exports = [...packageRootScript.matchAll(/echo "([A-Z_]+)=/gu)]
       .map((match) => match[1])
       .filter((name): name is string => name !== undefined);
-    expect(exports).toStrictEqual([
-      "WEBPRESSO_PACKAGE_ROOT",
-      "WEBPRESSO_AGENT_KIT_ROOT",
-      "NODE_PATH",
-    ]);
+    expect(exports).toStrictEqual(["WEBPRESSO_PACKAGE_ROOT", "NODE_PATH"]);
     expect(packageRootScript).toMatch(/catalog[\s\S]{0,200}exit 12/u);
 
     const packageRootDescription = digString(inputs["package-root"], "description") ?? "";
@@ -106,8 +97,10 @@ describe("setup-wp current information", () => {
     }
     expect(wpSection).toInclude("fails closed");
     expect(packageRootDescription).toInclude("fails closed");
-    expect(wpSection).not.toInclude("WP_AGENT_KIT_PACKAGE_ROOT");
-    expect(packageRootDescription).not.toInclude("WP_AGENT_KIT_PACKAGE_ROOT");
+    for (const retired of ["WEBPRESSO_AGENT_KIT_ROOT", "WP_AGENT_KIT_PACKAGE_ROOT"]) {
+      expect(wpSection).not.toInclude(retired);
+      expect(packageRootDescription).not.toInclude(retired);
+    }
   });
 
   it("M5 documents exact caller selection and no self-update", () => {
@@ -119,26 +112,7 @@ describe("setup-wp current information", () => {
     expect(wpSection).not.toMatch(/setup-wp[^\n]*(?:range|dist-tag)|self-update fallback/iu);
   });
 
-  it("M6 documents the current three-shape freshness migration workflow", () => {
-    expect(digString(freshness, "name")).toBe("Reusable webpresso freshness");
-    expect(Object.keys(asRecord(dig(freshness, "jobs"), "freshness jobs"))).toStrictEqual(["freshness"]);
-    expect(digString(freshness, "jobs", "freshness", "name")).toBe("webpresso-freshness");
-    expect(freshnessText).toInclude("ENV_RE");
-    expect(freshnessText).toInclude("SHELL_DEFAULT_RE");
-    expect(freshnessText).toInclude("COMPOSITE_KEY_RE");
-
-    expect(readme).toInclude(".github/workflows/webpresso-freshness.yml");
-    expect(freshnessSection).toInclude("Reusable webpresso freshness");
-    expect(freshnessSection).toInclude("webpresso-freshness");
-    expect(freshnessSection).toMatch(/exactly three npm pin shapes/iu);
-    expect(freshnessSection).toMatch(/setup-wp.*excluded/isu);
-    expect(freshnessSection).toMatch(/migration debt.*not an installer\s+or updater/isu);
-    expect(readme).not.toInclude("agent-kit-freshness.yml");
-    expect(freshnessSection).not.toMatch(/four known pin shapes/iu);
-  });
-
-  it("action and freshness behavior boundary", () => {
-    expect(createHash("sha256").update(freshnessText).digest("hex")).toBe(FRESHNESS_SHA256);
+  it("action behavior boundary", () => {
     expect(
       createHash("sha256").update(JSON.stringify(withoutDescriptions(action))).digest("hex"),
     ).toBe(SETUP_WP_ACTION_BEHAVIOR_SHA256);

@@ -20,7 +20,6 @@ import {
   SETUP_TOOLCHAIN_USES,
   SETUP_WP_USES,
   SETUP_WP_VERSION,
-  WORKFLOW_WEBPRESSO_FRESHNESS,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -376,7 +375,7 @@ describe("shared toolchain wiring", () => {
     }
   });
 
-  it("every reusable toolchain workflow uses caller-versioned agent-kit setup", () => {
+  it("every reusable toolchain workflow uses caller-versioned wp setup", () => {
     const candidatePaths = workflowPaths().filter((path) => !NON_TOOLCHAIN_WORKFLOWS.includes(path));
     const toolchainPaths = candidatePaths.filter((path) => allUses(loadYaml(path)).includes(SETUP_TOOLCHAIN_USES));
     expect(toolchainPaths).toStrictEqual(candidatePaths);
@@ -412,9 +411,9 @@ describe("pin consistency", () => {
   // First-party action references are immutable reviewed merge SHAs. This
   // repository intentionally has no tags; these shape and cross-reference
   // checks do not establish tag provenance (which applies to third-party pins).
-  // The setup-wp SHA, the toolchain SHA, and the agent-kit version each live at
+  // The setup-wp SHA, the toolchain SHA, and the wp version each live at
   // many irreducible YAML sites. Asserting literals here would make this file
-  // one more site every freshness bump has to edit, so the expectation is
+  // one more site every pin bump has to edit, so the expectation is
   // derived from the canonical workflow at runtime and what is asserted is
   // cross-site agreement plus value shape.
   it("derives the canonical pins from a single workflow and they are correctly shaped", () => {
@@ -444,7 +443,7 @@ describe("pin consistency", () => {
     expect([...new Set(references)]).toStrictEqual([SETUP_WP_USES]);
   });
 
-  it("every setup-wp step installs the same exact agent-kit semver", () => {
+  it("every setup-wp step installs the same exact wp version", () => {
     const versions = workflowAndActionPaths().flatMap((path) =>
       allStepsAnywhere(loadYaml(path))
         .filter((step) => {
@@ -511,37 +510,6 @@ describe("repo-wide pin and prose contracts", () => {
 });
 
 describe("toolchain exceptions", () => {
-  it("webpresso-freshness.yml is a deliberate toolchain exception", () => {
-    expect(Bun.file(WORKFLOW_WEBPRESSO_FRESHNESS).size, `expected ${WORKFLOW_WEBPRESSO_FRESHNESS} to exist`).toBeGreaterThan(0);
-    const workflow = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
-    const on = onSection(workflow);
-    expect(Object.keys(on), "must be callable as a reusable workflow").toContain("workflow_call");
-    expect(Object.keys(on), "must be manually exercisable without waiting for a schedule").toContain(
-      "workflow_dispatch",
-    );
-
-    const job = dig(workflow, "jobs", "freshness");
-    expect(job, "expected a `freshness` job").toBeDefined();
-    expect(dig(job, "permissions", "contents")).toBe("write");
-    expect(dig(job, "permissions", "pull-requests")).toBe("write");
-
-    // Deliberately excluded from the shared-toolchain invariant above: this is
-    // a repo-maintenance automation, not a caller-consuming CI/deploy workflow,
-    // so it does not install pnpm/Vite+/wp.
-    expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
-    expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
-  });
-
-  // The README calls this a *caller*-scheduled workflow. Pin the exact trigger
-  // set so prose and YAML cannot drift into claiming a `schedule:` that does
-  // not exist here (adding one would run the scan against this library instead
-  // of the consumer).
-  it("webpresso-freshness.yml declares exactly workflow_call and workflow_dispatch, never a schedule", () => {
-    const on = onSection(loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS));
-    expect(Object.keys(on).sort()).toStrictEqual(["workflow_call", "workflow_dispatch"]);
-    expect(readRepoFile(README_PATH)).toInclude("caller-scheduled reusable workflow");
-  });
-
   // The gate that makes every other test in this file binding. Without an
   // executor the suite is documentation: a broken contract merges green because
   // nothing ran it. Pin the trigger and the invocation so the gate cannot be
