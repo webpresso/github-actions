@@ -43,7 +43,7 @@ jobs:
             --recursive
             ./
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@27883b9b05dd721c848524dd816cc7c9103276f0
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@f9047de30cb95d1f7ca476ec23ef46c93ac6491d
 
       - uses: webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428
         with:
