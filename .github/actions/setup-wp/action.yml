@@ -29,7 +29,7 @@ inputs:
       Also install wp-package-root.tgz from the same public release as the
       binary and export WEBPRESSO_PACKAGE_ROOT and NODE_PATH. Requires no
       token or second version and fails closed when the extracted root has
-      no catalog/.
+      no catalog/. Requires wp >= 0.0.5.
     required: false
     default: "false"
 
@@ -136,6 +136,14 @@ runs:
         PACKAGE_ROOT_ASSET: wp-package-root.tgz
       run: |
         set -euo pipefail
+
+        # wp <= 0.0.4 located the package root only through a retired env
+        # name this step no longer exports, so those binaries cannot find it.
+        IFS=. read -r major minor patch <<< "${WP_VERSION%%[+-]*}"
+        if (( major == 0 && minor == 0 && patch < 5 )); then
+          echo "::error::package-root: true requires wp >= 0.0.5, got '${WP_VERSION}'"
+          exit 12
+        fi
 
         # One source, one version, no credential: the package root ships as an
         # asset on the SAME public release as the binary it belongs to.
