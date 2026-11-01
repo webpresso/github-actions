@@ -9,6 +9,10 @@ depends_on: []
 cross_repo_depends_on: []
 tags: []
 approvals: []
+review_dispositions:
+  - finding_id: "gate:83610e96da08beb6:codex:gpt-6.1-sol#1"
+    disposition: fixed
+    evidence: "Task 1.1 and MD-4 now embed a fail-fast exact-semver guard step before setup-wp in all three workflows, and the contract test asserts rejection of latest/^/~ ranges via the repo's extracted-script pattern; the round-1 nit is likewise addressed by embedding baseline literals (SHA 2003ca953f336efb779165f748e1ad8408565428, default 0.0.6) instead of reading local Git history."
 title: Caller-selected wp runtime for reusable workflows
 owner: Claude Code
 ---
