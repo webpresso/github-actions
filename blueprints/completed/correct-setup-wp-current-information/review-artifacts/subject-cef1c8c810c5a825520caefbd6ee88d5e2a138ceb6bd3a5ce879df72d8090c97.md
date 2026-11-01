@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "Correct setup-wp current information"
-status: __wp-lifecycle-status__
+status: completed
 complexity: M
 owner: "webpresso/github-actions"
 created: "2026-08-23"
