@@ -94,8 +94,14 @@ Add an optional `wp_version` input (type `string`, required `false`, default
 `"0.0.6"`, description naming exact-semver-only) to the `workflow_call` input
 maps of `.github/workflows/cloudflare-preview.yml`,
 `.github/workflows/cloudflare-production.yml`, and
-`.github/workflows/changesets-release.yml`. In each workflow's existing
-`setup-wp` step, replace the hardcoded `version: "0.0.6"` with
+`.github/workflows/changesets-release.yml`. In each workflow, ADD one small
+fail-fast validation step BEFORE the existing `setup-wp` step — an embedded
+`node -e` script (env-passed input, no shell interpolation) that exits
+nonzero unless `inputs.wp_version` matches an exact-semver pattern
+(`^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$`), naming the offending value.
+The promised exact-only contract is therefore enforced by these workflows
+themselves, not delegated to remote action internals. Then, in each workflow's
+existing `setup-wp` step, replace the hardcoded `version: "0.0.6"` with
 `version: ${{ inputs.wp_version }}`. Change nothing else: action SHAs, job
 permissions, secrets, toolchain steps, deploy commands, and every other input
 keep their current bytes. Ownership note: the `setup-wp` action itself and its
@@ -104,18 +110,21 @@ this task edits only the three caller-facing reusable workflows and adds one
 new focused contract test.
 
 Add `test/reusable-wp-version.test.ts` in this repo's existing `bun:test`
-style (see `test/workflow-shape.test.ts`): parse each of the three workflow
-YAML files and assert (1) the `wp_version` input exists with default `"0.0.6"`
-and required `false`; (2) the `setup-wp` step's `version:` equals
-`${{ inputs.wp_version }}` verbatim; (3) the `setup-wp` `uses:` SHA is
-unchanged from current `main`; (4) no other top-level workflow input or job
-changed relative to the checked-out baseline (compare against `git show
-ed99fb922279138571781036ad323a98af5a4dde:<path>` where practical). The repo's
-binding suite is `bun test` (run by `.github/workflows/self-test.yml`);
-`wp test` does not collect `bun:test` files here, so it is not used as a Verify
-command. The default-and-forward tests prove input plumbing only — they are not
-evidence that any particular wp version is publicly published or qualified
-(webpresso/app#2983 owns that).
+style (see `test/workflow-shape.test.ts`, including its extracted-script
+pattern for embedded `node` scripts): parse each of the three workflow YAML
+files and assert (1) the `wp_version` input exists with default `"0.0.6"` and
+required `false`; (2) a validation step precedes `setup-wp` and its embedded
+script REJECTS `latest`, `^0.0.6`, `~0.0.6`, and `0.0` while ACCEPTING
+`0.0.6` and `0.0.15`; (3) the `setup-wp` step's `version:` equals
+`${{ inputs.wp_version }}` verbatim; (4) the `setup-wp` `uses:` SHA equals
+the literal `2003ca953f336efb779165f748e1ad8408565428` embedded in the test —
+baseline expectations are embedded literals, never reads of local Git history,
+so the suite is history-independent. The repo's binding suite is `bun test`
+(run by `.github/workflows/self-test.yml`); `wp test` does not collect
+`bun:test` files here, so it is not used as a Verify command. The
+default, forwarding, and rejection tests prove input plumbing and enforcement
+only — they are not evidence that any particular wp version is publicly
+published or qualified (webpresso/app#2983 owns that).
 
 **Files:**
 
@@ -223,6 +232,7 @@ Draft note: complete this dossier before promotion to planned.
 | MD-1 | Input default | `"0.0.6"` (today's hardcoded value) | Bump to newest; floating `latest` | Existing callers must be unaffected until they opt in; user directive forbids floating versions |
 | MD-2 | Scope | Three workflows + one contract test only | Also editing setup-wp action/tests/README | Those surfaces belong to other active owners (archived versioned-archives lane, PR #55) |
 | MD-3 | Qualification boundary | Mechanism only; no version publication claim | Claiming 0.0.15 usable now | Publication/qualification is owned under webpresso/app#2983; tests prove plumbing only |
+| MD-4 | Exact-semver enforcement | Fail-fast guard step embedded in each workflow before `setup-wp` | Rely on the remote pinned action's own validation; caller-side regex only | Self-contained and provable by the repo's extracted-script test pattern; does not depend on remote action internals or caller discipline |
 
 ### Promotion Gates
 
