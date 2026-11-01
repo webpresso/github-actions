@@ -44,3 +44,14 @@ this repository by the PR #57 deletion lane (merged 2026-10-30). The claims
 that cited those files describe the surface as it existed at refinement time;
 the surviving reusable-workflow contracts and the setup-wp executable-lock
 suite are the retained authority for the claims that still apply.
+
+## 2026-11-01 — claude
+
+**Section:** Material Claims
+
+Retired evidence: repo:test/workflow-shape.test.ts -> repo:test/workflow-shape.subprocess.test.ts
+Retired evidence: repo:test/setup-wp-current-information.test.ts -> repo:test/setup-wp-current-information.test.ts
+
+The subprocess-in-unit-lane classification renamed the process-spawning suites
+(the workflow-shape and setup-wp contracts now live in *.subprocess.test.ts);
+the citations track the renamed files.
