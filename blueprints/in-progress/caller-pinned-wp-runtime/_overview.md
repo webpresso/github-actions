@@ -151,7 +151,17 @@ published or qualified (webpresso/app#2983 owns that).
 - Modify: `.github/workflows/cloudflare-preview.yml`
 - Modify: `.github/workflows/cloudflare-production.yml`
 - Modify: `.github/workflows/changesets-release.yml`
+- Modify: `.github/workflows/webpresso-security.yml`
+- Modify: `.github/workflows/self-test.yml`
+- Modify: `test/helpers.ts`
+- Modify: `test/workflow-shape.test.ts`
+- Modify: `package.json`
+- Modify: `pnpm-lock.yaml`
 - Create: `test/reusable-wp-version.test.ts`
+- Create: `.oxfmtrc.json`
+- Create: `.gitignore`
+
+**Repo provisioning repairs (each committed with a `Blueprint-exempt` trailer as a promotion/CI prerequisite, plan content unchanged at the time):** `packageManager: pnpm@12.3.4` pin + its `packageManagerDependencies` lockfile block (review-sandbox and preflight prerequisites); minimal `.oxfmtrc.json` (whole-repo format stage; `blueprints/**` ignored — lifecycle records and review artifacts are wp-tooling-managed, digest-verified unchanged) and `.gitignore` (formatter ignore path + generated `.agent/`/`.claude/` surfaces); eviction of tracked `node_modules` pnpm state files; one-time normalization of the never-formatted sources (formatting/key-order only, suite rerun green); `webpresso-security.yml` joins the same `wp_version` treatment because the repo's own uniformity contracts cover every toolchain workflow; `self-test.yml` gains a `setup-wp` 0.0.13 + `wp audit guardrails` step, closing the pre-existing `ci-guardrails-wiring` gap (0.0.13 is the latest published release; its guardrails were qualified locally on 2026-11-01 — 0.0.11 crashes on `#runtime/posix-ffi.js`; newer runtimes await webpresso/app#2983).
 
 **Change:**
 
@@ -268,6 +278,8 @@ Draft note: complete this dossier before promotion to planned.
 | MD-2 | Scope | Three workflows + one contract test only | Also editing setup-wp action/tests/README | Those surfaces belong to other active owners (archived versioned-archives lane, PR #55) |
 | MD-3 | Qualification boundary | Mechanism only; no version publication claim | Claiming 0.0.15 usable now | Publication/qualification is owned under webpresso/app#2983; tests prove plumbing only |
 | MD-4 | Exact-semver enforcement | Fail-fast guard step embedded in each workflow before `setup-wp` | Rely on the remote pinned action's own validation; caller-side regex only | Self-contained and provable by the repo's extracted-script test pattern; does not depend on remote action internals or caller discipline |
+| MD-5 | Positive-authority update | helpers derives the shared default from the canonical `wp_version` input; shape tests assert verbatim expression forwarding | Keep asserting one hardcoded version across all setup-wp steps | The reviewed change deliberately replaces that invariant; the repo's own uniformity contracts must encode the new one |
+| MD-6 | Never-provisioned worktree repairs | Blueprint-exempt hygiene commits (formatter config, ignore block, untracked state, pnpm pin block, self-test guardrails wiring on 0.0.13) | Bypassing preflight stages or leaving the repo unprovisioned | Each repair is a documented promotion/CI prerequisite; the plan subject carries them so the delivery diff is fully reviewed |
 
 ### Promotion Gates
 

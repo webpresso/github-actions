@@ -30,6 +30,21 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
+      # wp 0.0.13 is the latest published release whose guardrails run on this
+      # repository (qualified locally 2026-11-01; 0.0.11 crashes on
+      # #runtime/posix-ffi.js). Keep this step aligned when the qualification
+      # in webpresso/app#2983 publishes a newer runtime.
+      - uses: webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428
+        with:
+          version: "0.0.13"
+          package-root: true
+
+      # Guardrails reach this repository only while CI runs them here; the
+      # repo-wide audit is fast (small contract repo) and covers every file,
+      # so it runs unscoped rather than affected-scoped on a shallow checkout.
+      - name: Guardrails
+        run: wp audit guardrails
+
       # Structural contracts over the workflow/action YAML (pins, permissions,
       # secret-sink scoping, toolchain wiring) plus behavioral contracts: the
       # embedded scan scripts are extracted from their heredocs and executed
