@@ -193,7 +193,7 @@ describe("setup-wp package root", () => {
     expect(body).not.toMatch(/\/tarball\//u);
     expect(body).not.toInclude("api.github.com");
     expect(action).not.toHaveProperty("inputs.github-token");
-    expect(dig(action, "inputs", "package-root-repo")).toBeUndefined();
-    expect(dig(action, "inputs", "package-root-ref")).toBeUndefined();
+    expect(dig(action, "inputs", "package-root-repo")).toBe(undefined);
+    expect(dig(action, "inputs", "package-root-ref")).toBe(undefined);
   });
 });

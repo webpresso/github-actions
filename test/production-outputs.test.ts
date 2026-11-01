@@ -16,7 +16,7 @@ const workflow = loadYaml(WORKFLOW_PRODUCTION);
 describe("cloudflare-production.yml deploy_outputs passthrough", () => {
   it("declares a workflow_call output wired to the production job output", () => {
     const output = dig(onSection(workflow), "workflow_call", "outputs", "deploy_outputs");
-    expect(output, "on.workflow_call.outputs.deploy_outputs must exist").toBeDefined();
+    expect(output, "on.workflow_call.outputs.deploy_outputs must exist").not.toBe(undefined);
     expect(digString(output, "value")).toBe("${{ jobs.production.outputs.deploy_outputs }}");
     const description = digString(output, "description") ?? "";
     expect(description.length, "the output must carry a description").toBeGreaterThan(0);

@@ -26,7 +26,7 @@ describe("cloudflare-production.yml GitHub auth", () => {
     const deployStep = workflow.match(
       /- name: Run caller deploy block through the secret sink[\s\S]*?(?=\n\s+- name:)/u,
     )?.[0];
-    expect(deployStep, "deploy step must exist").toBeDefined();
+    expect(deployStep, "deploy step must exist").not.toBe(undefined);
     expect(deployStep).toMatch(
       /GITHUB_TOKEN: \$\{\{ inputs\.deploy_github_token && secrets\.GITHUB_TOKEN \|\| '' \}\}/u,
     );

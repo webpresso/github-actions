@@ -610,7 +610,7 @@ describe("self-test.yml exercises the action against the live API", () => {
 
   it("waits on a real green check produced earlier in the same run", () => {
     const job = jobs["wait-for-checks-success"];
-    expect(job, "expected a `wait-for-checks-success` job").toBeDefined();
+    expect(job, "expected a `wait-for-checks-success` job").not.toBe(undefined);
     expect(dig(job, "needs")).toBe("contract-tests");
     expect(dig(job, "permissions", "checks")).toBe("read");
     const steps = localActionSteps("wait-for-checks-success");
@@ -620,7 +620,7 @@ describe("self-test.yml exercises the action against the live API", () => {
 
   it("proves the bounded never-observed failure against the live API", () => {
     const job = jobs["wait-for-checks-bounded-failure"];
-    expect(job, "expected a `wait-for-checks-bounded-failure` job").toBeDefined();
+    expect(job, "expected a `wait-for-checks-bounded-failure` job").not.toBe(undefined);
     expect(dig(job, "permissions", "checks")).toBe("read");
     const steps = localActionSteps("wait-for-checks-bounded-failure");
     expect(steps.length).toBe(1);

@@ -118,7 +118,9 @@ describe("caller-selected wp runtime", () => {
       expect(input["type"]).toBe("string");
       expect(input["required"]).toBe(false);
       expect(input["default"]).toBe("0.0.6");
-      expect(String(input["description"])).toContain("Exact");
+      expect(typeof input["description"] === "string" ? input["description"] : "").toContain(
+        "Exact",
+      );
     });
 
     it(`${shortName}: guards wp_version with strict SemVer before setup-wp`, () => {

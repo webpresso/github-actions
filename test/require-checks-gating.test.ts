@@ -47,7 +47,7 @@ function jobOf(path: string, jobName: string): YamlRecord {
 
 function gateStepOf(path: string, jobName: string): YamlRecord {
   const first = stepsOf(jobOf(path, jobName))[0];
-  expect(first, `${path} ${jobName} has no steps`).toBeDefined();
+  expect(first, `${path} ${jobName} has no steps`).not.toBe(undefined);
   return first as YamlRecord;
 }
 
@@ -85,14 +85,14 @@ describe("require_checks gate placement", () => {
     for (const [path, jobName] of REQUIRE_CHECKS_WORKFLOWS) {
       const steps = stepsOf(jobOf(path, jobName));
       const gateIndex = steps.findIndex((step) =>
-        WAIT_FOR_CHECKS_USES_RE.test(String(step["uses"] ?? "")),
+        WAIT_FOR_CHECKS_USES_RE.test(typeof step["uses"] === "string" ? step["uses"] : ""),
       );
       expect(gateIndex, path).toBe(0);
 
       // A checkout must exist and must come later -- otherwise "first step"
       // would be trivially true for a job that never checks anything out.
       const checkoutIndex = steps.findIndex((step) =>
-        String(step["uses"] ?? "").startsWith("actions/checkout@"),
+        (typeof step["uses"] === "string" ? step["uses"] : "").startsWith("actions/checkout@"),
       );
       expect(checkoutIndex, `${path} has no checkout to precede`).toBeGreaterThan(gateIndex);
 
@@ -204,8 +204,8 @@ describe("require_checks gate wiring", () => {
     // changesets-release.yml has no checkout_ref input, so the commit under
     // release is the triggering one and the action's default is exactly right.
     // Restating it would create a second site to drift.
-    expect(workflowCallInputs(loadYaml(WORKFLOW_RELEASE))["checkout_ref"]).toBeUndefined();
-    expect(dig(gateStepOf(WORKFLOW_RELEASE, "release"), "with", "ref")).toBeUndefined();
+    expect(workflowCallInputs(loadYaml(WORKFLOW_RELEASE))["checkout_ref"]).toBe(undefined);
+    expect(dig(gateStepOf(WORKFLOW_RELEASE, "release"), "with", "ref")).toBe(undefined);
   });
 });
 
@@ -231,7 +231,7 @@ describe("job timeout bounds", () => {
     // Kept out on purpose: preview lanes are the short-lived ones and no
     // unbounded-hang incident motivated a bound there. Asserted so the absence
     // reads as a decision rather than an oversight.
-    expect(workflowCallInputs(loadYaml(WORKFLOW_PREVIEW))["job_timeout_minutes"]).toBeUndefined();
-    expect(dig(jobOf(WORKFLOW_PREVIEW, "preview"), "timeout-minutes")).toBeUndefined();
+    expect(workflowCallInputs(loadYaml(WORKFLOW_PREVIEW))["job_timeout_minutes"]).toBe(undefined);
+    expect(dig(jobOf(WORKFLOW_PREVIEW, "preview"), "timeout-minutes")).toBe(undefined);
   });
 });

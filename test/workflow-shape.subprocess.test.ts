@@ -114,7 +114,7 @@ describe("deploy workflow bootstrap contract", () => {
       const checkout = allSteps(workflow).find(
         (step) => usesOfStep(step) === "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       );
-      expect(checkout, path).toBeDefined();
+      expect(checkout, path).not.toBe(undefined);
       expect(dig(checkout, "with", "ref")).toBe("${{ inputs.checkout_ref || github.sha }}");
       expect(dig(workflow, "jobs", jobName, "environment")).toBe(
         "${{ inputs.github_environment }}",
@@ -233,7 +233,7 @@ describe("secret-sink boundary", () => {
       const rollback = findStepById(workflow, "rollback");
       const failureGate = findStepById(workflow, "smoke_failure");
 
-      expect(deploy, path).toBeDefined();
+      expect(deploy, path).not.toBe(undefined);
       expect(smoke?.["continue-on-error"], path).toBe(true);
       expect(digString(rollback, "if")).toInclude("steps.deploy.outcome == 'success'");
       expect(digString(rollback, "if")).toInclude("steps.smoke.outcome == 'failure'");
@@ -371,7 +371,7 @@ describe("shared toolchain wiring", () => {
         usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
     );
 
-    expect(setupVp).toBeDefined();
+    expect(setupVp).not.toBe(undefined);
     expect(dig(setupVp, "with", "run-install")).toBe(false);
     expect(Object.keys(asRecord(dig(action, "inputs"), "inputs"))).not.toContain(
       "cli-global-packages",
@@ -581,10 +581,10 @@ describe("toolchain exceptions", () => {
     expect(
       dig(workflow, "permissions", "pull-requests"),
       "read-only gate needs no write scope",
-    ).toBeUndefined();
+    ).toBe(undefined);
 
     const job = dig(workflow, "jobs", "contract-tests");
-    expect(job, "expected a `contract-tests` job").toBeDefined();
+    expect(job, "expected a `contract-tests` job").not.toBe(undefined);
     const commands = stepsOf(job)
       .map((step) => step["run"])
       .filter((value): value is string => typeof value === "string");
