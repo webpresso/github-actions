@@ -204,8 +204,8 @@ describe("require_checks gate wiring", () => {
     // changesets-release.yml has no checkout_ref input, so the commit under
     // release is the triggering one and the action's default is exactly right.
     // Restating it would create a second site to drift.
-    expect(workflowCallInputs(loadYaml(WORKFLOW_RELEASE))["checkout_ref"]).toBe(undefined);
-    expect(dig(gateStepOf(WORKFLOW_RELEASE, "release"), "with", "ref")).toBe(undefined);
+    expect(workflowCallInputs(loadYaml(WORKFLOW_RELEASE))["checkout_ref"] === undefined).toBe(true);
+    expect(dig(gateStepOf(WORKFLOW_RELEASE, "release"), "with", "ref") === undefined).toBe(true);
   });
 });
 
@@ -231,7 +231,9 @@ describe("job timeout bounds", () => {
     // Kept out on purpose: preview lanes are the short-lived ones and no
     // unbounded-hang incident motivated a bound there. Asserted so the absence
     // reads as a decision rather than an oversight.
-    expect(workflowCallInputs(loadYaml(WORKFLOW_PREVIEW))["job_timeout_minutes"]).toBe(undefined);
-    expect(dig(jobOf(WORKFLOW_PREVIEW, "preview"), "timeout-minutes")).toBe(undefined);
+    expect(
+      workflowCallInputs(loadYaml(WORKFLOW_PREVIEW))["job_timeout_minutes"] === undefined,
+    ).toBe(true);
+    expect(dig(jobOf(WORKFLOW_PREVIEW, "preview"), "timeout-minutes") === undefined).toBe(true);
   });
 });
