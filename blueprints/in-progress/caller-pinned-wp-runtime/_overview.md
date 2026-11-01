@@ -4,7 +4,7 @@ status: in-progress
 complexity: S
 created: '2026-11-01'
 last_updated: '2026-11-01'
-progress: 0% (0/1 tasks done, 0 blocked, updated 2026-11-01)
+progress: 100% (1/1 tasks done, 0 blocked, updated 2026-11-01)
 depends_on: []
 cross_repo_depends_on: []
 tags: []
@@ -87,7 +87,7 @@ This checklist is only a human-readable mirror. Enforced by `wp audit
 blueprint-lifecycle` and the `wp blueprint promote` command. See the owning
 repositories' pre-implementation rules.
 
-- [ ] Claude (`/claude`) or Codex (`/codex`) approval (satisfies the gate alone)
+- [x] Claude (`/claude`) or Codex (`/codex`) approval — Codex `gpt-6.1-sol`, gate `cc055a886d0c8d06` APPROVE (2026-11-01, round 3; rounds 1-2 REJECTs answered via review_dispositions)
 - Alternative: OpenCode-Go model approval — `/deepseek` / `/glm` / `/hy3` / `/kimi` /
   `/mimo` / `/minimax` / `/qwen`
 
@@ -95,7 +95,12 @@ repositories' pre-implementation rules.
 
 #### Task 1.1: [infra] Add wp_version inputs and verbatim forwarding to the three reusable workflows
 
-**Status:** todo
+**Status:** done
+**Verification:**
+
+```webpresso-evidence-v1
+[{"command":"bun test","entrypoint":"Full repo binding suite (self-test.yml runner) in the managed owner at implementation commit: 110 tests across 8 files pass, including the new test/reusable-wp-version.test.ts (16 assertions over all four reusable workflows: input default 0.0.6, guard-before-setup ordering, strict SemVer acceptance of 0.0.6/0.0.15/1.2.3-alpha.1+build.5 and rejection of latest/^/~ ranges and loose-regex false-accepts, verbatim ${{ inputs.wp_version }} forwarding, embedded script executed through node) and the updated positive-authority contracts in test/helpers.ts and test/workflow-shape.test.ts.","exit_code":0,"kind":"integration","result":"pass","target_files":["test/reusable-wp-version.test.ts","test/helpers.ts","test/workflow-shape.test.ts",".github/workflows/cloudflare-preview.yml",".github/workflows/cloudflare-production.yml",".github/workflows/changesets-release.yml",".github/workflows/webpresso-security.yml"],"ts":"2026-11-01T13:49:00Z"},{"audit_kind":"plan-verify-line-format-check-all-changed-files","command":"wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml .github/workflows/webpresso-security.yml test/reusable-wp-version.test.ts test/helpers.ts test/workflow-shape.test.ts","kind":"audit","passed":true,"result":"pass","ts":"2026-11-01T13:50:00Z"}]
+```
 
 **Depends:** None
 
@@ -161,7 +166,7 @@ shared workflow internals.
 
 **Acceptance:**
 
-- [ ] [A1] The three workflows are format-clean with the new input and verbatim forwarding; the new contract test passes under `bun test` for all three defaults and explicit `0.0.15` propagation; action SHAs and unrelated inputs are unchanged; no publication or qualification of any wp version is claimed by this lane.
+- [x] [A1] The three workflows are format-clean with the new input and verbatim forwarding; the new contract test passes under `bun test` for all three defaults and explicit `0.0.15` propagation; action SHAs and unrelated inputs are unchanged; no publication or qualification of any wp version is claimed by this lane.
 
 ## Completion Summary
 
@@ -170,11 +175,26 @@ non-empty content under both subsections are lifecycle requirements.
 
 ### Deliverables
 
-<!-- Summarize the concrete artifacts and behavior delivered. -->
+All four reusable workflows (`cloudflare-preview`, `cloudflare-production`,
+`changesets-release`, `webpresso-security`) expose an optional exact-SemVer
+`wp_version` input defaulting to `0.0.6` — byte-preserving for every existing
+caller — enforce it with a fail-fast strict-SemVer guard step that precedes
+`setup-wp`, and forward the caller's value verbatim to the pinned action. The
+positive-authority contracts were updated to the new invariant (helpers derives
+the shared default from the canonical input; shape tests assert verbatim
+forwarding), and the new `test/reusable-wp-version.test.ts` proves defaults,
+ordering, forwarding, and strict SemVer acceptance/rejection for all four
+workflows. Full `bun test` suite: 110/110. Implementation commit `ba3c04d`.
 
 ### Impact
 
-<!-- Summarize the resulting user, operator, or system impact. -->
+Consumers can now align preview deploys, production deploys, releases, and
+security scans to one exact qualified wp runtime by passing a single input,
+instead of inheriting hidden stale defaults (`0.0.5`/`0.0.6`) that differed
+from their own direct pins. Defaults are untouched, so nothing changes until a
+caller opts in. Passing tests prove the plumbing and enforcement only; picking
+a version still waits on the public-runtime qualification owned under
+webpresso/app#2983.
 
 ## Verification Gates
 
