@@ -20,6 +20,7 @@ import {
   SETUP_TOOLCHAIN_USES,
   SETUP_WP_USES,
   SETUP_WP_VERSION,
+  SETUP_WP_VERSION_EXPRESSION,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -78,7 +79,9 @@ describe("deploy workflow bootstrap contract", () => {
     expect(dig(workflowCallSecrets(workflow), "ci_secret_provider_token", "required")).toBe(false);
     expect(dig(inputs, "doppler_identity_id", "type")).toBe("string");
     expect(dig(workflow, "jobs", "preview", "permissions", "id-token")).toBe("write");
-    expect(dig(workflow, "jobs", "preview", "environment")).toBe("${{ inputs.github_environment }}");
+    expect(dig(workflow, "jobs", "preview", "environment")).toBe(
+      "${{ inputs.github_environment }}",
+    );
     expect(stepUses(WORKFLOW_PREVIEW)).toContain(
       "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73",
     );
@@ -94,7 +97,9 @@ describe("deploy workflow bootstrap contract", () => {
     expect(dig(workflowCallSecrets(workflow), "ci_secret_provider_token", "required")).toBe(false);
     expect(dig(inputs, "doppler_identity_id", "type")).toBe("string");
     expect(dig(workflow, "jobs", "production", "permissions", "id-token")).toBe("write");
-    expect(dig(workflow, "jobs", "production", "environment")).toBe("${{ inputs.github_environment }}");
+    expect(dig(workflow, "jobs", "production", "environment")).toBe(
+      "${{ inputs.github_environment }}",
+    );
     expect(stepUses(WORKFLOW_PRODUCTION)).toContain(
       "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73",
     );
@@ -111,7 +116,9 @@ describe("deploy workflow bootstrap contract", () => {
       );
       expect(checkout, path).toBeDefined();
       expect(dig(checkout, "with", "ref")).toBe("${{ inputs.checkout_ref || github.sha }}");
-      expect(dig(workflow, "jobs", jobName, "environment")).toBe("${{ inputs.github_environment }}");
+      expect(dig(workflow, "jobs", jobName, "environment")).toBe(
+        "${{ inputs.github_environment }}",
+      );
     }
   });
 });
@@ -121,8 +128,8 @@ describe("secret-sink boundary", () => {
     for (const [path, jobName] of DEPLOY_WORKFLOWS) {
       const workflow = loadYaml(path);
       const job = dig(workflow, "jobs", jobName);
-      const leaking = envKeys(job === undefined ? undefined : asRecord(job, jobName)).filter((name) =>
-        /(?:TOKEN|PASSWORD|_KEY)$/u.test(name),
+      const leaking = envKeys(job === undefined ? undefined : asRecord(job, jobName)).filter(
+        (name) => /(?:TOKEN|PASSWORD|_KEY)$/u.test(name),
       );
       expect(leaking, path).toStrictEqual([]);
 
@@ -156,7 +163,10 @@ describe("secret-sink boundary", () => {
       const providerSecretSteps = steps.filter((step) =>
         JSON.stringify(step).includes("secrets.ci_secret_provider_token"),
       );
-      expect(providerSecretSteps.map((step) => step["id"]), path).toStrictEqual([...allowedIds]);
+      expect(
+        providerSecretSteps.map((step) => step["id"]),
+        path,
+      ).toStrictEqual([...allowedIds]);
 
       for (const id of ["install", "verify", "smoke"]) {
         const step = findStepById(workflow, id);
@@ -164,8 +174,13 @@ describe("secret-sink boundary", () => {
           continue;
         }
         const expected =
-          id === "install" ? ["GITHUB_TOKEN", "NODE_AUTH_TOKEN", "INSTALL_COMMAND"] : [`${id.toUpperCase()}_COMMAND`];
-        expect(envKeys(step), `${path} ${id} must remain provider-runtime-secretless`).toStrictEqual(expected);
+          id === "install"
+            ? ["GITHUB_TOKEN", "NODE_AUTH_TOKEN", "INSTALL_COMMAND"]
+            : [`${id.toUpperCase()}_COMMAND`];
+        expect(
+          envKeys(step),
+          `${path} ${id} must remain provider-runtime-secretless`,
+        ).toStrictEqual(expected);
       }
     }
   });
@@ -177,7 +192,9 @@ describe("secret-sink boundary", () => {
       expect(contents).toInclude('Unknown secret sink "${secretSink}"');
       expect(contents).toInclude("does not allow the run operation");
       expect(contents).toInclude('Unknown secret profile "${secretProfile}"');
-      expect(contents).toInclude("Infisical is not supported by the sink-scoped reusable deploy harness");
+      expect(contents).toInclude(
+        "Infisical is not supported by the sink-scoped reusable deploy harness",
+      );
     }
   });
 
@@ -200,7 +217,9 @@ describe("secret-sink boundary", () => {
       expect(contents).toInclude(
         'wp secrets run --sink "${SECRET_SINK}" --profile "${SECRET_PROFILE}" -- bash -leo pipefail -c',
       );
-      expect(contents).not.toMatch(/^\s+bash -leo pipefail -c "\$(?:DEPLOY|DESTROY|ROLLBACK)_COMMAND"$/mu);
+      expect(contents).not.toMatch(
+        /^\s+bash -leo pipefail -c "\$(?:DEPLOY|DESTROY|ROLLBACK)_COMMAND"$/mu,
+      );
     }
   });
 
@@ -232,7 +251,10 @@ describe("embedded workflow scripts", () => {
       expect(programs.length, path).toBeGreaterThan(0);
       for (const program of programs) {
         const result = nodeSyntaxCheck(program.body);
-        expect(result.status, `${path} contains invalid embedded JavaScript:\n${result.stderr}`).toBe(0);
+        expect(
+          result.status,
+          `${path} contains invalid embedded JavaScript:\n${result.stderr}`,
+        ).toBe(0);
       }
     }
   });
@@ -345,12 +367,15 @@ describe("shared toolchain wiring", () => {
   it("the shared toolchain action uses catalog-aware Vite+ setup", () => {
     const action = loadYaml(ACTION_TOOLCHAIN);
     const setupVp = stepsOf(dig(action, "runs")).find(
-      (step) => usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
+      (step) =>
+        usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
     );
 
     expect(setupVp).toBeDefined();
     expect(dig(setupVp, "with", "run-install")).toBe(false);
-    expect(Object.keys(asRecord(dig(action, "inputs"), "inputs"))).not.toContain("cli-global-packages");
+    expect(Object.keys(asRecord(dig(action, "inputs"), "inputs"))).not.toContain(
+      "cli-global-packages",
+    );
     expect(readRepoFile(ACTION_TOOLCHAIN)).not.toInclude("npm install -g");
   });
 
@@ -366,18 +391,25 @@ describe("shared toolchain wiring", () => {
         continue;
       }
 
-      const toolchainSteps = allSteps(loadYaml(path)).filter((step) => usesOfStep(step) === SETUP_TOOLCHAIN_USES);
+      const toolchainSteps = allSteps(loadYaml(path)).filter(
+        (step) => usesOfStep(step) === SETUP_TOOLCHAIN_USES,
+      );
       expect(toolchainSteps.length, path).toBeGreaterThan(0);
       for (const step of toolchainSteps) {
-        const withKeys = step["with"] === undefined ? [] : Object.keys(asRecord(step["with"], "with"));
+        const withKeys =
+          step["with"] === undefined ? [] : Object.keys(asRecord(step["with"], "with"));
         expect(withKeys, path).not.toContain("cli-global-packages");
       }
     }
   });
 
   it("every reusable toolchain workflow uses caller-versioned wp setup", () => {
-    const candidatePaths = workflowPaths().filter((path) => !NON_TOOLCHAIN_WORKFLOWS.includes(path));
-    const toolchainPaths = candidatePaths.filter((path) => allUses(loadYaml(path)).includes(SETUP_TOOLCHAIN_USES));
+    const candidatePaths = workflowPaths().filter(
+      (path) => !NON_TOOLCHAIN_WORKFLOWS.includes(path),
+    );
+    const toolchainPaths = candidatePaths.filter((path) =>
+      allUses(loadYaml(path)).includes(SETUP_TOOLCHAIN_USES),
+    );
     expect(toolchainPaths).toStrictEqual(candidatePaths);
 
     for (const path of toolchainPaths) {
@@ -392,10 +424,12 @@ describe("shared toolchain wiring", () => {
             return;
           }
           setupWpCount += 1;
-          const toolchainIndex = steps.findIndex((candidate) => usesOfStep(candidate) === SETUP_TOOLCHAIN_USES);
+          const toolchainIndex = steps.findIndex(
+            (candidate) => usesOfStep(candidate) === SETUP_TOOLCHAIN_USES,
+          );
           expect(toolchainIndex, path).toBeGreaterThanOrEqual(0);
           expect(toolchainIndex, path).toBeLessThan(index);
-          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION);
+          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION_EXPRESSION);
         });
       }
       expect(setupWpCount, path).toBeGreaterThan(0);
@@ -424,7 +458,7 @@ describe("pin consistency", () => {
     );
     expect(SETUP_WP_USES).toMatch(FULL_SHA_USES_RE);
     expect(SETUP_WP_USES).toStartWith("webpresso/github-actions/.github/actions/setup-wp@");
-    expect(SETUP_WP_VERSION).toMatch(EXACT_SEMVER_RE);
+    expect(SETUP_WP_VERSION).toMatch(EXACT_SEMVER_RE); // validates the wp_version input default
   });
 
   it("every setup-webpresso-toolchain reference in the repo is the same full-SHA pin", () => {
@@ -443,7 +477,7 @@ describe("pin consistency", () => {
     expect([...new Set(references)]).toStrictEqual([SETUP_WP_USES]);
   });
 
-  it("every setup-wp step installs the same exact wp version", () => {
+  it("every setup-wp step forwards the caller wp_version expression verbatim", () => {
     const versions = workflowAndActionPaths().flatMap((path) =>
       allStepsAnywhere(loadYaml(path))
         .filter((step) => {
@@ -453,7 +487,7 @@ describe("pin consistency", () => {
         .map((step) => digString(step, "with", "version") ?? `<missing in ${path}>`),
     );
     expect(versions.length).toBeGreaterThan(0);
-    expect([...new Set(versions)]).toStrictEqual([SETUP_WP_VERSION]);
+    expect([...new Set(versions)]).toStrictEqual([SETUP_WP_VERSION_EXPRESSION]);
   });
 });
 
@@ -515,14 +549,24 @@ describe("toolchain exceptions", () => {
   // nothing ran it. Pin the trigger and the invocation so the gate cannot be
   // silently narrowed or gutted.
   it("self-test.yml gates the contract suite on every pull request", () => {
-    expect(Bun.file(WORKFLOW_SELF_TEST).size, `expected ${WORKFLOW_SELF_TEST} to exist`).toBeGreaterThan(0);
+    expect(
+      Bun.file(WORKFLOW_SELF_TEST).size,
+      `expected ${WORKFLOW_SELF_TEST} to exist`,
+    ).toBeGreaterThan(0);
     const workflow = loadYaml(WORKFLOW_SELF_TEST);
     const on = onSection(workflow);
-    expect(Object.keys(on), "contract suite must gate every pull request").toContain("pull_request");
-    expect(dig(on, "push", "branches"), "main must stay proven after merge").toStrictEqual(["main"]);
+    expect(Object.keys(on), "contract suite must gate every pull request").toContain(
+      "pull_request",
+    );
+    expect(dig(on, "push", "branches"), "main must stay proven after merge").toStrictEqual([
+      "main",
+    ]);
 
     expect(dig(workflow, "permissions", "contents")).toBe("read");
-    expect(dig(workflow, "permissions", "pull-requests"), "read-only gate needs no write scope").toBeUndefined();
+    expect(
+      dig(workflow, "permissions", "pull-requests"),
+      "read-only gate needs no write scope",
+    ).toBeUndefined();
 
     const job = dig(workflow, "jobs", "contract-tests");
     expect(job, "expected a `contract-tests` job").toBeDefined();

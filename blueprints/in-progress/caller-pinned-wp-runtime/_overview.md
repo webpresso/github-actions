@@ -1,10 +1,10 @@
 ---
 type: blueprint
-status: draft
+status: in-progress
 complexity: S
 created: '2026-11-01'
 last_updated: '2026-11-01'
-progress: 0% (drafted)
+progress: 0% (0/1 tasks done, 0 blocked, updated 2026-11-01)
 depends_on: []
 cross_repo_depends_on: []
 tags: []
@@ -18,6 +18,8 @@ review_dispositions:
     evidence: "The guard now uses the official strict SemVer pattern from semver.org (no leading zeros in numeric components or identifiers; prerelease and build metadata may appear together), and the contract test adds the demanded regression cases: rejects 01.2.3, 1.02.3, 1.2.3-01, 1.2.3++, 1.2.3- (loose-regex false-accepts); accepts 1.2.3-alpha.1+build.5 alongside 0.0.6 and 0.0.15."
 title: Caller-selected wp runtime for reusable workflows
 owner: Claude Code
+worktree_owner_id: owner-273f97207038
+worktree_owner_branch: bp/caller-pinned-wp-runtime
 ---
 
 # Caller-selected wp runtime for reusable workflows
@@ -227,7 +229,7 @@ Draft note: complete this dossier before promotion to planned.
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-11-01T13:20:00Z
+- verified-at: 2026-11-01T13:36:08.188Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -256,7 +258,7 @@ treat the new files' suites as task verification and CI.
 
 | Gate | Command | Expected outcome | Last result |
 | ---- | ------- | ---------------- | ----------- |
-| Workflow formatting | `wp format --check --files .github/workflows/changesets-release.yml` | pass | Not run |
+| Workflow formatting | `wp format --check --files .github/workflows/changesets-release.yml` | pass | pass at 2026-11-01T13:36:08.188Z |
 
 ### Residual Unknowns
 
