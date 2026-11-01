@@ -13,6 +13,9 @@ review_dispositions:
   - finding_id: "gate:83610e96da08beb6:codex:gpt-6.1-sol#1"
     disposition: fixed
     evidence: "Task 1.1 and MD-4 now embed a fail-fast exact-semver guard step before setup-wp in all three workflows, and the contract test asserts rejection of latest/^/~ ranges via the repo's extracted-script pattern; the round-1 nit is likewise addressed by embedding baseline literals (SHA 2003ca953f336efb779165f748e1ad8408565428, default 0.0.6) instead of reading local Git history."
+  - finding_id: "gate:97d51d7e092bdeb0:codex:gpt-6.1-sol#1"
+    disposition: fixed
+    evidence: "The guard now uses the official strict SemVer pattern from semver.org (no leading zeros in numeric components or identifiers; prerelease and build metadata may appear together), and the contract test adds the demanded regression cases: rejects 01.2.3, 1.02.3, 1.2.3-01, 1.2.3++, 1.2.3- (loose-regex false-accepts); accepts 1.2.3-alpha.1+build.5 alongside 0.0.6 and 0.0.15."
 title: Caller-selected wp runtime for reusable workflows
 owner: Claude Code
 ---
@@ -95,17 +98,21 @@ repositories' pre-implementation rules.
 **Depends:** None
 
 Add an optional `wp_version` input (type `string`, required `false`, default
-`"0.0.6"`, description naming exact-semver-only) to the `workflow_call` input
+`"0.0.6"`, description naming exact-SemVer-only) to the `workflow_call` input
 maps of `.github/workflows/cloudflare-preview.yml`,
 `.github/workflows/cloudflare-production.yml`, and
 `.github/workflows/changesets-release.yml`. In each workflow, ADD one small
 fail-fast validation step BEFORE the existing `setup-wp` step — an embedded
 `node -e` script (env-passed input, no shell interpolation) that exits
-nonzero unless `inputs.wp_version` matches an exact-semver pattern
-(`^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$`), naming the offending value.
-The promised exact-only contract is therefore enforced by these workflows
-themselves, not delegated to remote action internals. Then, in each workflow's
-existing `setup-wp` step, replace the hardcoded `version: "0.0.6"` with
+nonzero unless `inputs.wp_version` matches the official strict SemVer pattern
+from semver.org (core `0|[1-9]\d*` components with no leading zeros; optional
+prerelease of dot-separated identifiers where numeric identifiers have no
+leading zeros; optional build metadata; prerelease and build metadata MAY
+appear together), naming the offending value. Loose shapes such as
+`01.2.3`, `1.02.3`, `1.2.3-01`, or `1.2.3++` MUST be rejected. The promised
+exact-only contract is therefore enforced by these workflows themselves, not
+delegated to remote action internals. Then, in each workflow's existing
+`setup-wp` step, replace the hardcoded `version: "0.0.6"` with
 `version: ${{ inputs.wp_version }}`. Change nothing else: action SHAs, job
 permissions, secrets, toolchain steps, deploy commands, and every other input
 keep their current bytes. Ownership note: the `setup-wp` action itself and its
@@ -118,8 +125,10 @@ style (see `test/workflow-shape.test.ts`, including its extracted-script
 pattern for embedded `node` scripts): parse each of the three workflow YAML
 files and assert (1) the `wp_version` input exists with default `"0.0.6"` and
 required `false`; (2) a validation step precedes `setup-wp` and its embedded
-script REJECTS `latest`, `^0.0.6`, `~0.0.6`, and `0.0` while ACCEPTING
-`0.0.6` and `0.0.15`; (3) the `setup-wp` step's `version:` equals
+script REJECTS `latest`, `^0.0.6`, `~0.0.6`, `0.0`, and the loose-regex
+false-accepts `01.2.3`, `1.02.3`, `1.2.3-01`, `1.2.3++`, `1.2.3-` while
+ACCEPTING `0.0.6`, `0.0.15`, and `1.2.3-alpha.1+build.5` (prerelease and build
+metadata together); (3) the `setup-wp` step's `version:` equals
 `${{ inputs.wp_version }}` verbatim; (4) the `setup-wp` `uses:` SHA equals
 the literal `2003ca953f336efb779165f748e1ad8408565428` embedded in the test —
 baseline expectations are embedded literals, never reads of local Git history,
