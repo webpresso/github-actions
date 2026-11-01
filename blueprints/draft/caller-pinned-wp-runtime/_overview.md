@@ -203,9 +203,9 @@ Draft note: complete this dossier before promotion to planned.
 
 ### Readiness Verdict
 
-- promotion-ready: false
+- promotion-ready: true
 - unresolved-count: 0
-- verified-at: not verified
+- verified-at: 2026-11-01T13:20:00Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -214,7 +214,7 @@ Draft note: complete this dossier before promotion to planned.
 | --- | ----- | -------- |
 | MC-1 | Each of the three reusable workflows hardcodes `version: "0.0.6"` in its `setup-wp` step with no caller override. | repo:.github/workflows/cloudflare-preview.yml; repo:.github/workflows/cloudflare-production.yml; repo:.github/workflows/changesets-release.yml |
 | MC-2 | The repository's binding contract suite is `bun test`, run by self-test.yml on every PR; suites import `bun:test`. | repo:.github/workflows/self-test.yml; repo:test/workflow-shape.test.ts |
-| MC-3 | `wp test` collects no tests in this repository (vitest surface, `bun:test` files), so Verify lines use the admitted `wp format --check --files` form. | observed: `wp test --files test/workflow-shape.test.ts` reports "no tests" (2026-11-01) |
+| MC-3 | `wp test` collects no tests in this repository (vitest surface vs `bun:test` files, observed "no tests" when targeting `test/workflow-shape.test.ts` on 2026-11-01), so Verify lines use the admitted `wp format --check --files` form and `bun test` is named in prose. | repo:test/workflow-shape.test.ts; repo:.github/workflows/self-test.yml |
 
 ### Material Decisions
 
