@@ -27,8 +27,12 @@ describe("cloudflare-production.yml GitHub auth", () => {
       /- name: Run caller deploy block through the secret sink[\s\S]*?(?=\n\s+- name:)/u,
     )?.[0];
     expect(deployStep, "deploy step must exist").toBeDefined();
-    expect(deployStep).toMatch(/GITHUB_TOKEN: \$\{\{ inputs\.deploy_github_token && secrets\.GITHUB_TOKEN \|\| '' \}\}/u);
-    expect(deployStep).toMatch(/GH_TOKEN: \$\{\{ inputs\.deploy_github_token && secrets\.GITHUB_TOKEN \|\| '' \}\}/u);
+    expect(deployStep).toMatch(
+      /GITHUB_TOKEN: \$\{\{ inputs\.deploy_github_token && secrets\.GITHUB_TOKEN \|\| '' \}\}/u,
+    );
+    expect(deployStep).toMatch(
+      /GH_TOKEN: \$\{\{ inputs\.deploy_github_token && secrets\.GITHUB_TOKEN \|\| '' \}\}/u,
+    );
 
     const beforeDeploy = workflow.slice(0, workflow.indexOf(deployStep ?? ""));
     const withoutInstallStep = beforeDeploy.replace(
