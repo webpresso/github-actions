@@ -13,14 +13,18 @@
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  asRecord,
+  dig,
   digString,
   loadYaml,
   NODE_BIN,
   stepsOf,
+  workflowCallInputs,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
   WORKFLOW_SECURITY,
+  type YamlNode,
   type YamlRecord,
 } from "./helpers";
 
@@ -47,9 +51,9 @@ const REJECTED_VERSIONS = [
   "1.2.3-",
 ];
 
-function workflowSteps(workflow: YamlRecord, jobName: string): readonly YamlRecord[] {
-  const jobs = workflow["jobs"] as YamlRecord;
-  return stepsOf(jobs[jobName] as YamlRecord);
+function workflowSteps(workflow: YamlNode, jobName: string): readonly YamlRecord[] {
+  const jobs = asRecord(dig(workflow, "jobs"), "jobs");
+  return stepsOf(asRecord(jobs[jobName], `jobs.${jobName}`));
 }
 
 function stepName(step: YamlRecord): string | undefined {
@@ -109,10 +113,8 @@ describe("caller-selected wp runtime", () => {
 
     it(`${shortName}: exposes an optional wp_version input defaulting to 0.0.6`, () => {
       const workflow = loadYaml(workflowPath);
-      const on = workflow["on"] as YamlRecord;
-      const call = on["workflow_call"] as YamlRecord;
-      const inputs = call["inputs"] as YamlRecord;
-      const input = inputs["wp_version"] as YamlRecord;
+      const inputs = asRecord(workflowCallInputs(workflow), "workflow_call inputs");
+      const input = asRecord(inputs["wp_version"], "inputs.wp_version");
       expect(input["type"]).toBe("string");
       expect(input["required"]).toBe(false);
       expect(input["default"]).toBe("0.0.6");
