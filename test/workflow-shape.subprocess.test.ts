@@ -478,16 +478,31 @@ describe("pin consistency", () => {
   });
 
   it("every setup-wp step forwards the caller wp_version expression verbatim", () => {
-    const versions = workflowAndActionPaths().flatMap((path) =>
-      allStepsAnywhere(loadYaml(path))
-        .filter((step) => {
-          const uses = usesOfStep(step);
-          return uses !== undefined && isSetupWpUses(uses);
-        })
-        .map((step) => digString(step, "with", "version") ?? `<missing in ${path}>`),
-    );
+    // self-test.yml is repo-internal (no workflow_call inputs), so it pins a
+    // literal version for the guardrails audit instead of forwarding; the
+    // exact-semver shape of that literal is asserted separately below.
+    const versions = workflowAndActionPaths()
+      .filter((path) => path !== WORKFLOW_SELF_TEST)
+      .flatMap((path) =>
+        allStepsAnywhere(loadYaml(path))
+          .filter((step) => {
+            const uses = usesOfStep(step);
+            return uses !== undefined && isSetupWpUses(uses);
+          })
+          .map((step) => digString(step, "with", "version") ?? `<missing in ${path}>`),
+      );
     expect(versions.length).toBeGreaterThan(0);
     expect([...new Set(versions)]).toStrictEqual([SETUP_WP_VERSION_EXPRESSION]);
+    const selfTestVersions = allStepsAnywhere(loadYaml(WORKFLOW_SELF_TEST))
+      .filter((step) => {
+        const uses = usesOfStep(step);
+        return uses !== undefined && isSetupWpUses(uses);
+      })
+      .map((step) => digString(step, "with", "version"));
+    expect(selfTestVersions.length).toBeGreaterThan(0);
+    for (const version of selfTestVersions) {
+      expect(version).toMatch(EXACT_SEMVER_RE);
+    }
   });
 });
 
@@ -577,8 +592,10 @@ describe("toolchain exceptions", () => {
 
     // Deliberately excluded from the shared-toolchain invariant above: this
     // gate runs the repo's own contract suite and is never called by a
-    // consumer, so it does not install pnpm/Vite+/wp.
+    // consumer, so it does not install pnpm/Vite+. It DOES install wp
+    // (pinned to a published exact version) solely to run the guardrails
+    // audit over this repository — an addition reviewed under
+    // caller-pinned-wp-runtime closing the ci-guardrails-wiring gap.
     expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
-    expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
   });
 });

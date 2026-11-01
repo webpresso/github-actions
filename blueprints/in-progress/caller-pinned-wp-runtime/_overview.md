@@ -99,7 +99,7 @@ repositories' pre-implementation rules.
 **Verification:**
 
 ```webpresso-evidence-v1
-[{"command":"bun test","entrypoint":"Full repo binding suite (self-test.yml runner) in the managed owner at implementation commit: 110 tests across 8 files pass, including the new test/reusable-wp-version.test.ts (16 assertions over all four reusable workflows: input default 0.0.6, guard-before-setup ordering, strict SemVer acceptance of 0.0.6/0.0.15/1.2.3-alpha.1+build.5 and rejection of latest/^/~ ranges and loose-regex false-accepts, verbatim ${{ inputs.wp_version }} forwarding, embedded script executed through node) and the updated positive-authority contracts in test/helpers.ts and test/workflow-shape.test.ts.","exit_code":0,"kind":"integration","result":"pass","target_files":["test/reusable-wp-version.test.ts","test/helpers.ts","test/workflow-shape.test.ts",".github/workflows/cloudflare-preview.yml",".github/workflows/cloudflare-production.yml",".github/workflows/changesets-release.yml",".github/workflows/webpresso-security.yml"],"ts":"2026-11-01T13:49:00Z"},{"audit_kind":"plan-verify-line-format-check-all-changed-files","command":"wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml .github/workflows/webpresso-security.yml test/reusable-wp-version.test.ts test/helpers.ts test/workflow-shape.test.ts","kind":"audit","passed":true,"result":"pass","ts":"2026-11-01T13:50:00Z"}]
+[{"command":"bun test","entrypoint":"Full repo binding suite (self-test.yml runner) in the managed owner at implementation commit: 110 tests across 8 files pass, including the new test/reusable-wp-version.subprocess.test.ts (16 assertions over all four reusable workflows: input default 0.0.6, guard-before-setup ordering, strict SemVer acceptance of 0.0.6/0.0.15/1.2.3-alpha.1+build.5 and rejection of latest/^/~ ranges and loose-regex false-accepts, verbatim ${{ inputs.wp_version }} forwarding, embedded script executed through node) and the updated positive-authority contracts in test/helpers.ts and test/workflow-shape.subprocess.test.ts.","exit_code":0,"kind":"integration","result":"pass","target_files":["test/reusable-wp-version.subprocess.test.ts","test/helpers.ts","test/workflow-shape.subprocess.test.ts",".github/workflows/cloudflare-preview.yml",".github/workflows/cloudflare-production.yml",".github/workflows/changesets-release.yml",".github/workflows/webpresso-security.yml"],"ts":"2026-11-01T13:49:00Z"},{"audit_kind":"plan-verify-line-format-check-all-changed-files","command":"wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml .github/workflows/webpresso-security.yml test/reusable-wp-version.subprocess.test.ts test/helpers.ts test/workflow-shape.subprocess.test.ts","kind":"audit","passed":true,"result":"pass","ts":"2026-11-01T13:50:00Z"}]
 ```
 
 **Depends:** None
@@ -127,8 +127,8 @@ tests belong to other lanes (the archived versioned-archives owner and PR #55);
 this task edits only the three caller-facing reusable workflows and adds one
 new focused contract test.
 
-Add `test/reusable-wp-version.test.ts` in this repo's existing `bun:test`
-style (see `test/workflow-shape.test.ts`, including its extracted-script
+Add `test/reusable-wp-version.subprocess.test.ts` in this repo's existing `bun:test`
+style (see `test/workflow-shape.subprocess.test.ts`, including its extracted-script
 pattern for embedded `node` scripts): parse each of the three workflow YAML
 files and assert (1) the `wp_version` input exists with default `"0.0.6"` and
 required `false`; (2) a validation step precedes `setup-wp` and its embedded
@@ -154,10 +154,10 @@ published or qualified (webpresso/app#2983 owns that).
 - Modify: `.github/workflows/webpresso-security.yml`
 - Modify: `.github/workflows/self-test.yml`
 - Modify: `test/helpers.ts`
-- Modify: `test/workflow-shape.test.ts`
+- Modify: `test/workflow-shape.subprocess.test.ts`
 - Modify: `package.json`
 - Modify: `pnpm-lock.yaml`
-- Create: `test/reusable-wp-version.test.ts`
+- Create: `test/reusable-wp-version.subprocess.test.ts`
 - Create: `.oxfmtrc.json`
 - Create: `.gitignore`
 
@@ -172,7 +172,7 @@ shared workflow internals.
 
 **Verify:**
 
-- [A1] `wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml test/reusable-wp-version.test.ts`
+- [A1] `wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml test/reusable-wp-version.subprocess.test.ts`
 
 **Acceptance:**
 
@@ -192,7 +192,7 @@ caller — enforce it with a fail-fast strict-SemVer guard step that precedes
 `setup-wp`, and forward the caller's value verbatim to the pinned action. The
 positive-authority contracts were updated to the new invariant (helpers derives
 the shared default from the canonical input; shape tests assert verbatim
-forwarding), and the new `test/reusable-wp-version.test.ts` proves defaults,
+forwarding), and the new `test/reusable-wp-version.subprocess.test.ts` proves defaults,
 ordering, forwarding, and strict SemVer acceptance/rejection for all four
 workflows. Full `bun test` suite: 110/110. Implementation commit `ba3c04d`.
 
@@ -267,8 +267,8 @@ Draft note: complete this dossier before promotion to planned.
 | ID  | Claim | Evidence |
 | --- | ----- | -------- |
 | MC-1 | Each of the three reusable workflows hardcodes `version: "0.0.6"` in its `setup-wp` step with no caller override. | repo:.github/workflows/cloudflare-preview.yml; repo:.github/workflows/cloudflare-production.yml; repo:.github/workflows/changesets-release.yml |
-| MC-2 | The repository's binding contract suite is `bun test`, run by self-test.yml on every PR; suites import `bun:test`. | repo:.github/workflows/self-test.yml; repo:test/workflow-shape.test.ts |
-| MC-3 | `wp test` collects no tests in this repository (vitest surface vs `bun:test` files, observed "no tests" when targeting `test/workflow-shape.test.ts` on 2026-11-01), so Verify lines use the admitted `wp format --check --files` form and `bun test` is named in prose. | repo:test/workflow-shape.test.ts; repo:.github/workflows/self-test.yml |
+| MC-2 | The repository's binding contract suite is `bun test`, run by self-test.yml on every PR; suites import `bun:test`. | repo:.github/workflows/self-test.yml; repo:test/workflow-shape.subprocess.test.ts |
+| MC-3 | `wp test` collects no tests in this repository (vitest surface vs `bun:test` files, observed "no tests" when targeting `test/workflow-shape.subprocess.test.ts` on 2026-11-01), so Verify lines use the admitted `wp format --check --files` form and `bun test` is named in prose. | repo:test/workflow-shape.subprocess.test.ts; repo:.github/workflows/self-test.yml |
 
 ### Material Decisions
 
