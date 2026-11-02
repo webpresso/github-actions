@@ -1,3 +1,20 @@
+---
+type: blueprint
+title: Caller-controlled agent-kit version
+owner: webpresso
+status: completed
+complexity: S
+created: '2026-07-11'
+last_updated: '2026-11-02'
+historical_zero_task_waiver: true
+historical_zero_task_rationale: >-
+  This legacy completed record uses a historical checkbox task list rather than
+  structured task headings. The maintainer authorized this metadata-only
+  migration on 2026-11-02, preserving the original prose and all review artifacts.
+  The waiver permits parsing the historical record; it claims no new task
+  execution, verification, or approval.
+---
+
 # Caller-controlled agent-kit version
 
 ## Outcome

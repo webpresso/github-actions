@@ -8,6 +8,12 @@ created: "2026-06-19"
 last_updated: "2026-08-10"
 completed_at: "2026-08-10"
 progress: "100% (caller OIDC proof recorded; parked residual closed)"
+historical_zero_task_waiver: true
+historical_zero_task_rationale: >-
+  This legacy completed record uses its original numbered task list rather than
+  structured task headings. The maintainer authorized this metadata-only waiver
+  on 2026-11-02, preserving the existing historical dates, original prose, and all
+  review artifacts. It claims no new task execution, verification, or approval.
 depends_on: []
 cross_repo_depends_on: []
 tags:
