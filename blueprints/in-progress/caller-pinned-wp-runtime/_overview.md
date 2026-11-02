@@ -3,8 +3,8 @@ type: blueprint
 status: in-progress
 complexity: S
 created: '2026-11-01'
-last_updated: '2026-11-01'
-progress: 2/3 tasks done, 1 blocked (updated 2026-11-02)
+last_updated: '2026-11-02'
+progress: 2/4 tasks done, 1 blocked (updated 2026-11-02)
 depends_on: []
 cross_repo_depends_on: []
 tags: []
@@ -26,66 +26,34 @@ worktree_owner_branch: bp/caller-pinned-wp-runtime
 
 **Goal:** Let a caller pin one exact wp runtime version across the shared preview, production, and Changesets reusable workflows without changing today's defaults for existing callers.
 
-## Current authority and repair hold
+## Current decision and authority
 
-The original Task 1.1 proof and approvals below record their original reviewed scope and execution only; they do not approve this amendment or establish delivery readiness. All four reusable workflows already changed. The diff from ed99fb9 also changes self-test, setup suites, README, configuration, dependencies and types, contradicting the original non-goals and ownership boundaries. Those overlaps require coordination and an explicit scope decision; they are not cleared by this note.
+Task 1.1 and its original approval and dispositions are historical records, limited to their original reviewed subject and proof. Its three-workflow and full-SemVer contract, old scope claims and old acceptance are superseded for future work by Tasks 1.3 and 1.4 below. They do not approve this amendment. The implementation is unmerged and does not yet satisfy the new contract.
 
-The immutable remote `setup-wp@2003ca953f336efb779165f748e1ad8408565428` rejects `1.2.3-alpha.1+build.5` before download although the wrapper accepts it. Thus full SemVer support is currently false. Resolve with authority either by narrowing the supported contract to the intersection accepted by the action, or by coordinating an action guard repair and a new immutable pin. Neither option is selected here. [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html) defines prerelease and build metadata; runtime release qualification remains exclusively with webpresso/app#2983.
+**Decision:** accept only exact stable `major.minor.patch` with no leading zeros. In a JavaScript regex literal the intended pattern is `/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/`; its backslashes escape literal dots in that context. Require a full-length match as well: JavaScript `$` can match before a final line terminator. Reject prerelease, build metadata, ranges, `latest`, whitespace including a trailing newline, and a `v` prefix. Default `0.0.6` and verbatim forwarding stay unchanged; never strip or normalize the input. All accepted values fit the pinned action guard. This is a new unmerged caller input, so narrowing it sacrifices no existing caller version contract. [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html) defines stable versions and suffixes; this API intentionally supports only the stable subset.
 
-Installed preflight source `src/cli/commands/ci-preflight-snapshot.ts` at `1362ff` deletes `WEBPRESSO_WP_BIN` and drops the source selector for consumer snapshots; `resolveWpLauncher` prefers installed runtime context. Resolve the authority mismatch without retries, shims, or gate bypass. Exact-head preflight, Sol delivery review, lifecycle, CI and landing remain outstanding.
+**Principles:** preserve immutable historical evidence; fail closed at the wrapper; keep one runtime qualification owner. **Drivers:** compatibility with the immutable action, unchanged defaults for existing callers, and the smallest change for qualified stable releases.
 
-Engineering and DevEx rationale: preserve immutable evidence and actual commands, choose the smallest authorized repair, fail closed on unresolved compatibility and ownership, and avoid a duplicate runtime writer. No UI work or new research beyond official SemVer is needed. Historical reviews are not restarted.
+| Option | Benefits | Costs and decision |
+| --- | --- | --- |
+| Stable-only wrapper (chosen) | Every accepted value fits the existing pinned guard; no action change | Suffixes rejected explicitly; sufficient for latest qualified stable wp. |
+| Full SemVer plus action guard repair and new immutable pin | Supports prerelease plus build metadata | Requires coordination with the live action owner and a new pin; unnecessary for this requirement. Rejected. |
 
-## Product wedge anchor
+The remote `setup-wp@2003ca953f336efb779165f748e1ad8408565428` guard is `^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$`; it rejects `1.2.3-alpha.1+build.5` before download while the existing wrapper admits it. Do not change the action, downloader or SHA. The live action owner is `/Users/ozby-mac/repos/webpresso/_worktrees/github-actions-setup-wp-archives`, branch `feat/setup-wp-versioned-archives`, HEAD `3167474db93eabd2cd3964d5706b43d4884c54d4`, with an unpushed commit. This plan avoids that owner's files; no ownership handoff is assumed.
 
-- **Stage outcome:** Each of the three reusable workflows accepts an optional exact-semver `wp_version` input and forwards it verbatim to its existing `setup-wp` step; the default stays the currently hardcoded version, so every existing caller is byte-for-byte unaffected until it opts in.
-- **Consuming surface:** `.github/workflows/cloudflare-preview.yml`, `.github/workflows/cloudflare-production.yml`, `.github/workflows/changesets-release.yml` — the `setup-wp` `version:` wiring inside each.
-- **New user-visible capability:** A consumer can align preview deploys, production deploys, and releases to one qualified wp release (e.g. `0.0.15` once webpresso/app#2983 qualification lands) instead of inheriting a hidden stale default.
+PR #55 was observed open at head `29a81bcd6ec45691f75d5e569a86c52052e9c399`; it changes `.github/workflows/self-test.yml`, `test/workflow-shape.test.ts` and a completed blueprint. It overlaps this branch's self-test and renamed shape suite. Integrate only after a verified merge or an explicit documented handoff, preserving all PR #55 changes. Do not edit its owner. This is an execution dependency, not a cleared overlap.
 
-## Planning Summary
+The actual `ed99fb9..69eff86` scope is: modified `.github/workflows/{changesets-release,cloudflare-preview,cloudflare-production,self-test,webpresso-security}.yml`, `README.md`, `package.json`, `pnpm-lock.yaml`, `test/{helpers,production-auth.test,production-outputs.test,require-checks-gating.test,setup-wp-current-information.test}.ts`; added `.gitignore`, `.oxfmtrc.json`, `test/reusable-wp-version.subprocess.test.ts`, `tsconfig.json`, `tsconfig.test.json`; deleted `node_modules/.modules.yaml` and `node_modules/.pnpm-workspace-state-v1.json`; renamed `test/setup-wp.test.ts` to `test/setup-wp.subprocess.test.ts`, `test/wait-for-checks.test.ts` to `test/wait-for-checks.subprocess.test.ts`, and `test/workflow-shape.test.ts` to `test/workflow-shape.subprocess.test.ts`. Documentation also adds the erratum, this overview, five review artifacts and the review ledger. These are actual existing changes, not a claim of approved ownership or provisioning exemption.
 
-- Goal input: `Caller-selected wp runtime for reusable workflows`
-- Complexity: `S`
-- Draft slug: `caller-pinned-wp-runtime`
-- Output path: `blueprints/draft/caller-pinned-wp-runtime/_overview.md`
-- Generated command: `wp blueprint new "Caller-selected wp runtime for reusable workflows" --complexity S`
-- Validation scope: parser compliance before write
+**Package root and qualification:** the wrappers do not request package-root. Version alignment alone does not qualify every consumer path. The runtime owner must qualify actual consumer commands without overrides under webpresso/app#2983. If reusable paths need package-root, make an explicit downstream amendment before implementing that behavior; direct steps are not proof. No runtime publishing, package-root acquisition change or duplicate runtime writer belongs here.
 
-## Architecture Overview
+Installed preflight source `src/cli/commands/ci-preflight-snapshot.ts` at `1362ff` deletes `WEBPRESSO_WP_BIN` and drops the source selector for consumer snapshots; `resolveWpLauncher` prefers installed runtime context. Resolve that authority mismatch without retries, shims or gate bypass. Exact-head preflight, Sol delivery, current CI, lifecycle and landing remain outstanding.
 
-```text
-caller workflow (uses: …/cloudflare-preview.yml@<sha>)
-  with:
-    …existing inputs…
-    wp_version: "0.0.15"        # optional; default "0.0.6"
-        │ forwarded verbatim
-        ▼
-shared job step: setup-wp@<existing sha>
-  with:
-    version: ${{ inputs.wp_version }}   # was hardcoded "0.0.6"
-```
+**Affected engineering and DevEx checks:** the chosen guard preserves caller bytes, fails before download, and exercises the wrapper plus a pinned action compatibility oracle; actionable errors name the invalid value and exact stable format. Existing callers retain their default. Current execution is blocked until current-subject approval and the integration prerequisites below. This is infrastructure with no UI or product-strategy change, so UI and CEO review are not needed. No further research is needed for this choice. Historical reviews are not restarted.
 
-Same shape for `cloudflare-production.yml` and `changesets-release.yml`. No new action, downloader, or default change.
+## Dependency graph
 
-## Key Decisions
-
-| Decision | Choice | Rationale |
-| -------- | ------ | --------- |
-| Input shape | One optional `wp_version` string per workflow, exact semver, default `"0.0.6"` | `"0.0.6"` is what shared `main` (ed99fb9) hardcodes today; a defaulted input preserves every existing caller exactly. Exact semver only — no floating `latest` (user directive; floating would silently change runtimes). |
-| Forwarding | Replace only the hardcoded `version:` value inside each workflow's existing `setup-wp` step with `${{ inputs.wp_version }}` | The action SHA, permissions, secrets, toolchain, and deploy behavior stay untouched; the diff is one line per workflow plus the input block. |
-| No package-root input | Do not add one in this lane | Current shared steps do not request package-root; adding it would change artifact acquisition for opted-in callers. Consumers needing package-root use their own direct `setup-wp` steps, which already carry `package-root: true`. |
-| Qualification boundary | This lane ships the mechanism only | Publishing/qualifying a runtime is owned under webpresso/app#2983. Tests prove input propagation, not that any specific version is published. Consumers pass a version only after that qualification lands. |
-
-## Quick Reference (Execution Waves)
-
-| Wave              | Tasks | Dependencies | Parallelizable |
-| ----------------- | ----- | ------------ | -------------- |
-| **Wave 1**        | 1.1   | None         | 1 agent        |
-| **Critical path** | 1.1   | --           | 1 wave         |
-
-**Note:** Use t-shirt sizing (XS/S/M/L/XL) for individual task estimates, NOT day/week estimates.
-
-**Lifecycle:** Blueprint frontmatter `status` is one of `draft`, `planned`, `parked`, `in-progress`, `completed`, `archived`. Use `parked` when the blueprint is intentionally paused but should remain distinct from active planning or abandoned work. There is no blueprint-level `blocked` status; when work waits on an external dependency, set the task **Status:** to `blocked` and add a non-empty **Blocked:** line with the reason.
+Historical 1.1 and recovery 1.2 → current plan approval → stable contract fix 1.3 → integration 1.4. In parallel with plan approval, the independent PR #55 merge or documented handoff and app#2983 consumer-command qualification may progress under their owners. Neither qualifies delivery by itself.
 
 ## Approvals (required before promotion to `planned`)
 
@@ -104,6 +72,8 @@ repositories' pre-implementation rules.
 The approval above applies only to its original reviewed subject; it does not authorize the amended scope or resolve the hold.
 
 ## Phase 1: Caller-selected wp version [Complexity: S]
+
+Task 1.1 below is preserved historical proof and its original contract is superseded by the current decision and Task 1.3.
 
 #### Task 1.1: [infra] Add wp_version inputs and verbatim forwarding to the three reusable workflows
 
@@ -194,132 +164,86 @@ shared workflow internals.
 
 **Status:** done
 
-Restored the ten historical files to original base bytes and appended a controlling erratum. At 2026-11-02T05:47:37Z, exact byte comparisons against ed99fb922279138571781036ad323a98af5a4dde passed for all ten, and the changed-path whitelist contained exactly the twelve authorized Markdown paths. `git diff --check` passed. `wp audit blueprint-pr-coverage --base ed99fb922279138571781036ad323a98af5a4dde` failed: 22 implementation paths lack a valid completed owner. The initial unstaged `wp audit blueprint-lifecycle --affected` skipped because it scopes to staged files. At 2026-11-02T05:47:55Z, `wp audit blueprint-lifecycle --affected --branch` failed because the amended plan has no matching approval; `wp blueprint audit` failed with invalid type/status schema errors. Staging was denied by the filesystem at the linked Git index lock; no commit was made.
+Restored the ten historical files to original base bytes and appended a controlling erratum. At 2026-11-02T05:47:37Z, exact byte comparisons against ed99fb922279138571781036ad323a98af5a4dde passed for all ten, and the changed-path whitelist contained exactly the twelve authorized Markdown paths. `git diff --check` passed. `wp audit blueprint-pr-coverage --base ed99fb922279138571781036ad323a98af5a4dde` failed: 22 implementation paths lack a valid completed owner. The initial unstaged `wp audit blueprint-lifecycle --affected` skipped because it scopes to staged files. At 2026-11-02T05:47:55Z, `wp audit blueprint-lifecycle --affected --branch` failed because the amended plan has no matching approval; `wp blueprint audit` failed with invalid type/status schema errors. Staging was denied by the filesystem at the linked Git index lock; no commit was made. The human subsequently committed this recovery with normal hooks as `69eff86bf6a0f99bbdef6a8c3d4d0e8dce327ca4`.
 
-#### Task 1.3: [infra] Resolve compatibility and ownership scope
+#### Task 1.3: [infra] Enforce the stable runtime contract
+
+**Status:** todo
+**Depends:** Current amended plan approval; Task 1.2.
+
+After approval, update the `wp_version` description, actionable error and env-passed `node -e` guard in all four reusable workflows: `.github/workflows/cloudflare-preview.yml`, `.github/workflows/cloudflare-production.yml`, `.github/workflows/changesets-release.yml`, `.github/workflows/webpresso-security.yml`. Apply the stable-only literal in Current decision; retain default `0.0.6`, guard-before-setup ordering, action SHA and verbatim forwarding. Update relevant wrapper documentation to say exact stable, not generic SemVer. Preserve unrelated action behavior and inputs.
+
+Update `test/reusable-wp-version.subprocess.test.ts`, reusing `guardRunScript`, `runGuardScript`, `JOB_FOR_WORKFLOW` and existing YAML helpers. Execute each extracted guard, and execute an embedded exact reviewed action guard as a compatibility oracle tied to the same literal SHA; never download or run action code. Assert all accepted stable cases (including `0.0.6`, `0.0.15`, `1.2.3`) pass both guards; verify grammar and no-leading-zero property, defaults, order, pin and verbatim forwarding. Assert wrapper rejection of `1.2.3-alpha.1+build.5`, standalone prerelease and build suffixes, leading-zero components, `latest`, ranges, whitespace including trailing newline, `v` prefix and incomplete versions. The oracle demonstrates that the combined suffix is rejected by the pinned action. The new test must first expose the current wrapper's suffix acceptance, then pass after the repair. No dependency is added.
+
+**Verify:** Run focused `bun test test/reusable-wp-version.subprocess.test.ts`, the binding `bun test` suite, and applicable changed-file `wp format --check --files ...` after implementation. Capture actual results at execution; none is claimed here.
+
+#### Task 1.4: [infra] Integrate and qualify delivery
 
 **Status:** blocked
-**Blocked:** The action compatibility choice and ownership overlaps require coordination and authority; exact-head preflight and delivery gates remain outstanding.
+**Blocked:** PR #55 verified merge or explicit documented handoff, app#2983 qualification of actual consumer commands without overrides, current amended plan approval, and Task 1.3 are prerequisites. Exact-head preflight, Sol delivery review, current CI and lifecycle are outstanding.
+**Depends:** Task 1.3 and the independent prerequisites above.
 
-Choose an authorized contract and scope, make the smallest repair, then obtain the required current-subject review and run the outstanding gates. Do not duplicate runtime release qualification.
+After verifying PR #55's merge or documenting an explicit handoff, integrate preserving all its changes and re-evaluate the changed-file scope. Confirm runtime-owner qualification of the actual consumer commands. If package-root is necessary in reusable paths, stop and make an explicit downstream amendment before implementing it. Resolve preflight runtime authority as described above, then run exact-head preflight, Sol delivery review, current CI and lifecycle/coverage checks. Do not bypass gates or claim landing until their actual results support it.
 
 ## Completion Summary
 
-Fill this section before any transition to `completed`; the exact headings and
-non-empty content under both subsections are lifecycle requirements.
-
 ### Deliverables
 
-Historical implementation report, limited to the original Task 1.1 proof; current delivery is blocked as described above.
-
-All four reusable workflows (`cloudflare-preview`, `cloudflare-production`,
-`changesets-release`, `webpresso-security`) expose an optional exact-SemVer
-`wp_version` input defaulting to `0.0.6` — byte-preserving for every existing
-caller — enforce it with a fail-fast strict-SemVer guard step that precedes
-`setup-wp`, and forward the caller's value verbatim to the pinned action. The
-positive-authority contracts were updated to the new invariant (helpers derives
-the shared default from the canonical input; shape tests assert verbatim
-forwarding), and the new `test/reusable-wp-version.subprocess.test.ts` proves defaults,
-ordering, forwarding, and strict SemVer acceptance/rejection for all four
-workflows. Full `bun test` suite: 110/110. Implementation commit `ba3c04d`.
+Historical Task 1.1 implementation and Task 1.2 evidence recovery exist. The stable-only wrapper guard, compatibility tests and current descriptions remain to be implemented after current plan approval. Integration and delivery checks remain blocked as stated in Task 1.4.
 
 ### Impact
 
-Consumers can now align preview deploys, production deploys, releases, and
-security scans to one exact qualified wp runtime by passing a single input,
-instead of inheriting hidden stale defaults (`0.0.5`/`0.0.6`) that differed
-from their own direct pins. Defaults are untouched, so nothing changes until a
-caller opts in. Passing tests prove the plumbing and enforcement only; picking
-a version still waits on the public-runtime qualification owned under
-webpresso/app#2983.
+The intended consumer can select a qualified stable runtime while existing callers retain `0.0.6`; the current unmerged implementation has a suffix compatibility defect and must not be presented as delivery-ready. Qualification of actual consumer commands belongs to app#2983.
 
 ## Verification Gates
 
-| Gate        | Command                      | Success Criteria                                |
-| ----------- | ---------------------------- | ----------------------------------------------- |
-| Format      | `wp format --check --files` (changed files) | Zero drift                        |
-| Contract    | `bun test` (repo binding suite, per self-test.yml) | All suites pass, including the new propagation contract |
-| Review      | Sol exact-head delivery gate | Approve with zero blockers                      |
+| Gate | Required evidence |
+| --- | --- |
+| Contract | Task 1.3 focused and full binding suite, including extracted wrapper and pinned-action oracle cases. |
+| Format | Changed-file `wp format --check --files` after implementation. |
+| Delivery | Exact-head preflight, Sol delivery, current CI and lifecycle/coverage after integration prerequisites. |
 
-## Cross-Plan References
+## Cross-Plan References and Non-goals
 
-| Type       | Blueprint | Relationship |
-| ---------- | --------- | ------------ |
-| Upstream   | webpresso/app#2983 public-runtime qualification | Independent — this lane ships the input mechanism; consumers pass a version only after qualification lands |
-| Downstream | webpresso/aksaprocess.tr PR #71 latest-wp preparation (`held/latest-wp-0.0.15`) | Enabled — its reusable-path alignment passes `wp_version: "0.0.15"` once this lands and qualification completes |
-| Scope conflict | setup-wp action internals, self-test.yml, setup tests, README | Original non-goals; actual diff changes self-test, setup suites and README. Ownership requires coordination. |
-
-## Edge Cases and Error Handling
-
-| Edge Case | Risk | Solution | Task |
-| --------- | ---- | -------- | ---- |
-| Caller passes a non-existent or unqualified version | Setup-wp download 404 or unqualified runtime | Fail naturally at setup-wp (existing behavior); this lane adds no validation beyond exact-semver description guidance; qualification stays with app#2983 | 1.1 |
-| Caller omits `wp_version` | Behavior change for existing callers | Default `"0.0.6"` equals today's hardcoded value byte-for-byte; contract test pins the default | 1.1 |
-| Floating `latest` or range input | Silent runtime drift across executions | Description mandates exact semver; contract test asserts the default is exact; no range parsing added | 1.1 |
-
-## Non-goals
-
-- Original non-goal: changing the `setup-wp` action, its self-test, its tests, or the README (other owners). The actual diff contradicts part of this boundary; ownership is unresolved.
-- Publishing, retagging, or qualifying any wp release (webpresso/app#2983).
-- Changing shared defaults for existing callers or adding package-root acquisition.
-- Editing any consumer repository from this lane.
-
-## Risks
-
-| Risk | Impact | Mitigation |
-| ---- | ------ | ---------- |
-| Reusable-workflow input mistakes break deploys at callers | Failed preview/production runs | One-line forwarding; contract test pins default, forwarding, and unchanged SHAs; self-test.yml runs the suite on every PR |
-| Mechanism ships but consumers pin unqualified versions | False sense of alignment | PR and blueprint state explicitly that passing tests prove plumbing only; consumer opt-in waits for app#2983 qualification |
-
-## Technology Choices
-
-| Component | Technology | Version | Why |
-| --------- | ---------- | ------- | --- |
-| Test runner | `bun test` | repo standard (self-test.yml) | Zero-dependency repo; `wp test`/vitest does not collect `bun:test` files |
-| Input default | `0.0.6` | shared main ed99fb9 hardcoded value | Byte-preserving default for every existing caller |
+- PR #55 owns overlapping self-test and workflow-shape changes; integration is conditional on verified merge or documented handoff, preserving all its changes.
+- The setup-wp archives owner retains the action and downloader. This lane does not alter its files or pin.
+- app#2983 exclusively owns runtime publishing and qualification. Consumer changes, package-root acquisition and release publication are outside this lane.
 
 ## Trust Dossier
 
-Draft note: complete this dossier before promotion to planned.
-
 ### Readiness Verdict
 
-- promotion-ready: false
-- unresolved-count: 2
-- verified-at: 2026-11-01T13:36:08.188Z
+- promotion-ready: true
+- unresolved-count: 0
+- verified-at: 2026-11-02T06:31:25Z
 - trust-gate-version: v1
+
+The amended design choices and references have been checked for plan review; current-subject approval is still outstanding. This readiness flag does not assert delivery or integration readiness. `unresolved-count` refers to architectural choices, not the explicit execution prerequisites or unrun delivery gates.
 
 ### Material Claims
 
-| ID  | Claim | Evidence |
-| --- | ----- | -------- |
-| MC-1 | Each of the three reusable workflows hardcodes `version: "0.0.6"` in its `setup-wp` step with no caller override. | repo:.github/workflows/cloudflare-preview.yml; repo:.github/workflows/cloudflare-production.yml; repo:.github/workflows/changesets-release.yml |
-| MC-2 | The repository's binding contract suite is `bun test`, run by self-test.yml on every PR; suites import `bun:test`. | repo:.github/workflows/self-test.yml; repo:test/workflow-shape.subprocess.test.ts |
-| MC-3 | `wp test` collects no tests in this repository (vitest surface vs `bun:test` files, observed "no tests" when targeting `test/workflow-shape.subprocess.test.ts` on 2026-11-01), so Verify lines use the admitted `wp format --check --files` form and `bun test` is named in prose. | repo:test/workflow-shape.subprocess.test.ts; repo:.github/workflows/self-test.yml |
+| ID | Claim | Evidence |
+| --- | --- | --- |
+| MC-1 | Four existing wrapper guards accept combined suffixes while the pinned action guard rejects them. | repo:.github/workflows/cloudflare-preview.yml; repo:.github/workflows/cloudflare-production.yml; repo:.github/workflows/changesets-release.yml; repo:.github/workflows/webpresso-security.yml; repo:test/reusable-wp-version.subprocess.test.ts; web:https://github.com/webpresso/github-actions/blob/2003ca953f336efb779165f748e1ad8408565428/.github/actions/setup-wp/action.yml (2026-11-02) |
+| MC-2 | The binding test is Bun and the current guard can be extracted and executed using its `guardRunScript` and `runGuardScript` helpers. | repo:test/reusable-wp-version.subprocess.test.ts; repo:.github/workflows/self-test.yml |
+| MC-3 | Stable versions are a SemVer subset; suffixes are excluded by this contract. | web:https://semver.org/spec/v2.0.0.html (2026-11-02) |
 
 ### Material Decisions
 
-| ID  | Decision | Chosen option | Rejected alternatives | Rationale |
-| --- | -------- | ------------- | --------------------- | --------- |
-| MD-1 | Input default | `"0.0.6"` (today's hardcoded value) | Bump to newest; floating `latest` | Existing callers must be unaffected until they opt in; user directive forbids floating versions |
-| MD-2 | Scope | Three workflows + one contract test only | Also editing setup-wp action/tests/README | Those surfaces belong to other active owners (archived versioned-archives lane, PR #55) |
-| MD-3 | Qualification boundary | Mechanism only; no version publication claim | Claiming 0.0.15 usable now | Publication/qualification is owned under webpresso/app#2983; tests prove plumbing only |
-| MD-4 | Exact-semver enforcement | Fail-fast guard step embedded in each workflow before `setup-wp` | Rely on the remote pinned action's own validation; caller-side regex only | Self-contained and provable by the repo's extracted-script test pattern; does not depend on remote action internals or caller discipline |
-| MD-5 | Positive-authority update | helpers derives the shared default from the canonical `wp_version` input; shape tests assert verbatim expression forwarding | Keep asserting one hardcoded version across all setup-wp steps | The reviewed change deliberately replaces that invariant; the repo's own uniformity contracts must encode the new one |
-| MD-6 | Never-provisioned worktree repairs | Blueprint-exempt hygiene commits (formatter config, ignore block, untracked state, pnpm pin block, self-test guardrails wiring on 0.0.13) | Bypassing preflight stages or leaving the repo unprovisioned | Each repair is a documented promotion/CI prerequisite; the plan subject carries them so the delivery diff is fully reviewed |
+| ID | Decision | Chosen option | Rejected alternatives | Rationale |
+| --- | --- | --- | --- | --- |
+| D1 | Runtime input | Exact stable, full-length match, unchanged default and verbatim forwarding | Full SemVer plus action repair and new pin | Fits the pinned guard and qualified stable requirement without touching the live action owner. |
+| D2 | Integration | Verified PR #55 merge or documented handoff, then preserve its changes | Assume the overlapping work is cleared | Avoids overwriting another owner. |
+| D3 | Qualification | Runtime owner qualifies actual consumer commands without overrides | Infer qualification from version alignment | Package-root needs and runtime behavior require explicit evidence. |
+
+The three principles and drivers are recorded in Current decision. Integration and qualification remain execution dependencies.
 
 ### Promotion Gates
 
-A promotion gate must target a file the reviewed tree already carries: the plan
-is promoted before the implementation is committed, so a file the plan creates
-is not in the reviewed tree. Gate the existing files your change modifies, and
-treat the new files' suites as task verification and CI.
-
 | Gate | Command | Expected outcome | Last result |
-| ---- | ------- | ---------------- | ----------- |
-| Workflow formatting | `wp format --check --files .github/workflows/changesets-release.yml` | pass | pass at 2026-11-01T13:36:08.188Z |
+| --- | --- | --- | --- |
+| Workflow formatting | `wp format --check --files .github/workflows/changesets-release.yml` | pass | deferred: amended subject; prior timestamp is historical and no format command was run in this planning pass. |
 
 ### Residual Unknowns
 
-- The supported version contract and action pin need an authorized compatibility decision.
-- Ownership and scope of changes outside the original non-goals remain unresolved; preflight runtime authority and delivery gates remain outstanding.
+None.
