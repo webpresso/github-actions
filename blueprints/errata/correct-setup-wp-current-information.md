@@ -55,3 +55,11 @@ Retired evidence: repo:test/setup-wp-current-information.test.ts -> repo:test/se
 The subprocess-in-unit-lane classification renamed the process-spawning suites
 (the workflow-shape and setup-wp contracts now live in *.subprocess.test.ts);
 the citations track the renamed files.
+
+## 2026-11-02 — codex
+
+**Section:** Historical evidence and Material Claims
+
+This correction controls the contradictory 2026-11-01 Material Claims entries above. The normalized `__wp-lifecycle-status__` placeholders in historical subject snapshots are intentional reviewed-content normalization, not invalid lifecycle statuses. Preserve those snapshots and all ledgers as historical evidence. Historical verification commands retain the filenames actually recorded at execution; a current test-suite rename is navigation, not retroactive execution or proof that a renamed command ran.
+
+Git deletion commit 778dea1 (2026-10-30, PR #57; preceded by 766bdc5) removed the freshness workflow and focused suite. Their historical claims and receipts remain evidence of that retired scanner, not current behavior. The earlier mappings to the Changesets workflow and setup-wp subprocess suite do not establish semantic equivalence and are retracted. No successor is asserted for those deleted freshness surfaces. The workflow-shape and setup-wp suite renames may help locate current files but do not replace historical evidence or establish identical behavior; the earlier self-mapping of setup-wp-current-information does not document a rename. Read current source for current behavior.

@@ -4,7 +4,7 @@ status: in-progress
 complexity: S
 created: '2026-11-01'
 last_updated: '2026-11-01'
-progress: 100% (1/1 tasks done, 0 blocked, updated 2026-11-01)
+progress: 2/3 tasks done, 1 blocked (updated 2026-11-02)
 depends_on: []
 cross_repo_depends_on: []
 tags: []
@@ -25,6 +25,16 @@ worktree_owner_branch: bp/caller-pinned-wp-runtime
 # Caller-selected wp runtime for reusable workflows
 
 **Goal:** Let a caller pin one exact wp runtime version across the shared preview, production, and Changesets reusable workflows without changing today's defaults for existing callers.
+
+## Current authority and repair hold
+
+The original Task 1.1 proof and approvals below record their original reviewed scope and execution only; they do not approve this amendment or establish delivery readiness. All four reusable workflows already changed. The diff from ed99fb9 also changes self-test, setup suites, README, configuration, dependencies and types, contradicting the original non-goals and ownership boundaries. Those overlaps require coordination and an explicit scope decision; they are not cleared by this note.
+
+The immutable remote `setup-wp@2003ca953f336efb779165f748e1ad8408565428` rejects `1.2.3-alpha.1+build.5` before download although the wrapper accepts it. Thus full SemVer support is currently false. Resolve with authority either by narrowing the supported contract to the intersection accepted by the action, or by coordinating an action guard repair and a new immutable pin. Neither option is selected here. [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html) defines prerelease and build metadata; runtime release qualification remains exclusively with webpresso/app#2983.
+
+Installed preflight source `src/cli/commands/ci-preflight-snapshot.ts` at `1362ff` deletes `WEBPRESSO_WP_BIN` and drops the source selector for consumer snapshots; `resolveWpLauncher` prefers installed runtime context. Resolve the authority mismatch without retries, shims, or gate bypass. Exact-head preflight, Sol delivery review, lifecycle, CI and landing remain outstanding.
+
+Engineering and DevEx rationale: preserve immutable evidence and actual commands, choose the smallest authorized repair, fail closed on unresolved compatibility and ownership, and avoid a duplicate runtime writer. No UI work or new research beyond official SemVer is needed. Historical reviews are not restarted.
 
 ## Product wedge anchor
 
@@ -90,6 +100,8 @@ repositories' pre-implementation rules.
 - [x] Claude (`/claude`) or Codex (`/codex`) approval — Codex `gpt-6.1-sol`, gate `cc055a886d0c8d06` APPROVE (2026-11-01, round 3; rounds 1-2 REJECTs answered via review_dispositions)
 - Alternative: OpenCode-Go model approval — `/deepseek` / `/glm` / `/hy3` / `/kimi` /
   `/mimo` / `/minimax` / `/qwen`
+
+The approval above applies only to its original reviewed subject; it does not authorize the amended scope or resolve the hold.
 
 ## Phase 1: Caller-selected wp version [Complexity: S]
 
@@ -178,12 +190,27 @@ shared workflow internals.
 
 - [x] [A1] The three workflows are format-clean with the new input and verbatim forwarding; the new contract test passes under `bun test` for all three defaults and explicit `0.0.15` propagation; action SHAs and unrelated inputs are unchanged; no publication or qualification of any wp version is claimed by this lane.
 
+#### Task 1.2: [docs] Recover historical evidence
+
+**Status:** done
+
+Restored the ten historical files to original base bytes and appended a controlling erratum. At 2026-11-02T05:47:37Z, exact byte comparisons against ed99fb922279138571781036ad323a98af5a4dde passed for all ten, and the changed-path whitelist contained exactly the twelve authorized Markdown paths. `git diff --check` passed. `wp audit blueprint-pr-coverage --base ed99fb922279138571781036ad323a98af5a4dde` failed: 22 implementation paths lack a valid completed owner. The initial unstaged `wp audit blueprint-lifecycle --affected` skipped because it scopes to staged files. At 2026-11-02T05:47:55Z, `wp audit blueprint-lifecycle --affected --branch` failed because the amended plan has no matching approval; `wp blueprint audit` failed with invalid type/status schema errors. Staging was denied by the filesystem at the linked Git index lock; no commit was made.
+
+#### Task 1.3: [infra] Resolve compatibility and ownership scope
+
+**Status:** blocked
+**Blocked:** The action compatibility choice and ownership overlaps require coordination and authority; exact-head preflight and delivery gates remain outstanding.
+
+Choose an authorized contract and scope, make the smallest repair, then obtain the required current-subject review and run the outstanding gates. Do not duplicate runtime release qualification.
+
 ## Completion Summary
 
 Fill this section before any transition to `completed`; the exact headings and
 non-empty content under both subsections are lifecycle requirements.
 
 ### Deliverables
+
+Historical implementation report, limited to the original Task 1.1 proof; current delivery is blocked as described above.
 
 All four reusable workflows (`cloudflare-preview`, `cloudflare-production`,
 `changesets-release`, `webpresso-security`) expose an optional exact-SemVer
@@ -220,7 +247,7 @@ webpresso/app#2983.
 | ---------- | --------- | ------------ |
 | Upstream   | webpresso/app#2983 public-runtime qualification | Independent — this lane ships the input mechanism; consumers pass a version only after qualification lands |
 | Downstream | webpresso/aksaprocess.tr PR #71 latest-wp preparation (`held/latest-wp-0.0.15`) | Enabled — its reusable-path alignment passes `wp_version: "0.0.15"` once this lands and qualification completes |
-| Non-goal   | setup-wp action internals, self-test.yml, setup tests, README | Owned by the archived versioned-archives lane and PR #55; untouched here |
+| Scope conflict | setup-wp action internals, self-test.yml, setup tests, README | Original non-goals; actual diff changes self-test, setup suites and README. Ownership requires coordination. |
 
 ## Edge Cases and Error Handling
 
@@ -232,7 +259,7 @@ webpresso/app#2983.
 
 ## Non-goals
 
-- Changing the `setup-wp` action, its self-test, its tests, or the README (other owners).
+- Original non-goal: changing the `setup-wp` action, its self-test, its tests, or the README (other owners). The actual diff contradicts part of this boundary; ownership is unresolved.
 - Publishing, retagging, or qualifying any wp release (webpresso/app#2983).
 - Changing shared defaults for existing callers or adding package-root acquisition.
 - Editing any consumer repository from this lane.
@@ -257,8 +284,8 @@ Draft note: complete this dossier before promotion to planned.
 
 ### Readiness Verdict
 
-- promotion-ready: true
-- unresolved-count: 0
+- promotion-ready: false
+- unresolved-count: 2
 - verified-at: 2026-11-01T13:36:08.188Z
 - trust-gate-version: v1
 
@@ -294,4 +321,5 @@ treat the new files' suites as task verification and CI.
 
 ### Residual Unknowns
 
-None.
+- The supported version contract and action pin need an authorized compatibility decision.
+- Ownership and scope of changes outside the original non-goals remain unresolved; preflight runtime authority and delivery gates remain outstanding.
