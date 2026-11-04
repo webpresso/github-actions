@@ -4,7 +4,7 @@ status: in-progress
 complexity: S
 created: '2026-11-01'
 last_updated: '2026-11-02'
-progress: 2/4 tasks done, 1 blocked (updated 2026-11-02)
+progress: 75% (3/4 tasks done, 1 blocked, updated 2026-11-02)
 depends_on: []
 cross_repo_depends_on: []
 tags: []
@@ -168,7 +168,14 @@ Restored the ten historical files to original base bytes and appended a controll
 
 #### Task 1.3: [infra] Enforce the stable runtime contract
 
-**Status:** todo
+**Status:** done
+**Verification:**
+
+```webpresso-evidence-v1
+[{"command":"bun test test/reusable-wp-version.subprocess.test.ts","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-02T18:28:37Z"},{"command":"bun test","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-02T18:28:49Z"},{"audit_kind":"format","command":"wp format --check --files .github/workflows/cloudflare-preview.yml .github/workflows/cloudflare-production.yml .github/workflows/changesets-release.yml .github/workflows/webpresso-security.yml README.md test/reusable-wp-version.subprocess.test.ts","exit_code":0,"kind":"audit","passed":true,"result":"pass","ts":"2026-11-02T18:28:50Z"},{"audit_kind":"git-diff-check","command":"git diff --check","exit_code":0,"kind":"audit","passed":true,"result":"pass","ts":"2026-11-02T18:28:50Z"}]
+```
+**Unblocked:** Awaiting current-subject Sol plan approval; no implementation edits have started.
+
 **Depends:** Current amended plan approval; Task 1.2.
 
 After approval, update the `wp_version` description, actionable error and env-passed `node -e` guard in all four reusable workflows: `.github/workflows/cloudflare-preview.yml`, `.github/workflows/cloudflare-production.yml`, `.github/workflows/changesets-release.yml`, `.github/workflows/webpresso-security.yml`. Apply the stable-only literal in Current decision; retain default `0.0.6`, guard-before-setup ordering, action SHA and verbatim forwarding. Update relevant wrapper documentation to say exact stable, not generic SemVer. Preserve unrelated action behavior and inputs.

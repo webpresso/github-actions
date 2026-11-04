@@ -1,9 +1,10 @@
 /**
- * Caller-selected wp runtime contract: the three reusable workflows expose an
- * optional exact-SemVer `wp_version` input, guard it with a fail-fast
- * validation step that precedes `setup-wp`, and forward the caller's value
- * verbatim to the pinned action. Baseline expectations (the action SHA and the
- * `0.0.6` default) are embedded literals, never reads of local Git history.
+ * Caller-selected wp runtime contract: the four reusable workflows expose an
+ * optional exact stable `wp_version` input (`major.minor.patch` only), guard it
+ * with a fail-fast validation step that precedes `setup-wp`, and forward the
+ * caller's value verbatim to the pinned action. Baseline expectations (the
+ * action SHA and the `0.0.6` default) are embedded literals, never reads of
+ * local Git history.
  *
  * Passing these tests proves input plumbing and enforcement only; it is NOT
  * evidence that any particular wp version is publicly published or qualified
@@ -30,6 +31,9 @@ import {
 
 const SETUP_WP_USES =
   "webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428";
+// Exact version expression from setup-wp/action.yml at the immutable SHA above.
+// This is a compatibility oracle only; the action is never downloaded or run.
+const PINNED_SETUP_WP_VERSION_GUARD = /^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$/;
 const GUARD_STEP_NAME = "Validate wp_version input";
 const JOB_FOR_WORKFLOW: ReadonlyArray<readonly [string, string]> = [
   [WORKFLOW_PREVIEW, "preview"],
@@ -38,17 +42,26 @@ const JOB_FOR_WORKFLOW: ReadonlyArray<readonly [string, string]> = [
   [WORKFLOW_SECURITY, "security"],
 ];
 
-const ACCEPTED_VERSIONS = ["0.0.6", "0.0.15", "1.2.3-alpha.1+build.5"];
+const ACCEPTED_VERSIONS = ["0.0.6", "0.0.15", "1.2.3", "12.34.56"];
 const REJECTED_VERSIONS = [
   "latest",
   "^0.0.6",
   "~0.0.6",
   "0.0",
+  "1.2",
   "01.2.3",
   "1.02.3",
   "1.2.3-01",
   "1.2.3++",
   "1.2.3-",
+  "1.2.3-alpha.1",
+  "1.2.3+build.5",
+  "1.2.3-alpha.1+build.5",
+  " 1.2.3",
+  "1.2.3 ",
+  "1.2.3\n",
+  "\t1.2.3",
+  "v1.2.3",
 ];
 
 function workflowSteps(workflow: YamlNode, jobName: string): readonly YamlRecord[] {
@@ -92,19 +105,72 @@ function guardRunScript(step: YamlRecord): string {
 }
 
 function guardRegex(script: string): RegExp {
-  const literal = /const ok = \/(.+?)\/\.test\(v\)/u.exec(script);
+  const literal = /const stableVersion = \/(.+?)\/\.exec\(v\)/u.exec(script);
   if (literal === null) {
-    throw new Error("guard script does not bind a regex literal to `ok`");
+    throw new Error("guard script does not bind a regex literal to `stableVersion`");
   }
   return new RegExp(literal[1]);
 }
 
-function runGuardScript(script: string, version: string): number {
-  const result = spawnSync(NODE_BIN, ["-e", script], {
-    env: { ...process.env, WP_VERSION_INPUT: version },
+function regexMatchesWholeInput(regex: RegExp, version: string): boolean {
+  const match = regex.exec(version);
+  return match !== null && match[0] === version;
+}
+
+function runGuardScripts(
+  scripts: readonly string[],
+  versions: readonly string[],
+): readonly (readonly number[])[] {
+  const harness = `
+const vm = require("node:vm");
+const guardScripts = ${JSON.stringify(scripts)};
+const versions = ${JSON.stringify(versions)};
+const exitSignal = {};
+const statuses = guardScripts.map((guardScript) => versions.map((version) => {
+  let status = 0;
+  const guardProcess = {
+    env: { WP_VERSION_INPUT: version },
+    exit(code) {
+      status = code;
+      throw exitSignal;
+    },
+  };
+  try {
+    vm.runInNewContext(
+      guardScript,
+      {
+        process: guardProcess,
+        console: { error: () => {} },
+      },
+      { timeout: 500 },
+    );
+  } catch (error) {
+    if (error !== exitSignal) throw error;
+  }
+  return status;
+}));
+process.stdout.write(JSON.stringify(statuses));
+`;
+  const result = spawnSync(NODE_BIN, ["-e", harness], {
+    env: process.env,
     encoding: "utf8",
   });
-  return result.status ?? -1;
+  if (result.status !== 0) {
+    throw new Error(
+      result.stderr || `Node guard harness exited with status ${String(result.status)}`,
+    );
+  }
+  const parsed: unknown = JSON.parse(result.stdout);
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some(
+      (statuses) =>
+        !Array.isArray(statuses) || statuses.some((status) => typeof status !== "number"),
+    )
+  ) {
+    throw new Error("Node guard harness returned malformed statuses");
+  }
+  return parsed;
 }
 
 describe("caller-selected wp runtime", () => {
@@ -118,12 +184,13 @@ describe("caller-selected wp runtime", () => {
       expect(input["type"]).toBe("string");
       expect(input["required"]).toBe(false);
       expect(input["default"]).toBe("0.0.6");
-      expect(typeof input["description"] === "string" ? input["description"] : "").toContain(
-        "Exact",
-      );
+      const description = typeof input["description"] === "string" ? input["description"] : "";
+      expect(description).toContain("stable");
+      expect(description).toContain("major.minor.patch");
+      expect(description).not.toMatch(/prerelease|build/iu);
     });
 
-    it(`${shortName}: guards wp_version with strict SemVer before setup-wp`, () => {
+    it(`${shortName}: guards stable wp_version before setup-wp`, () => {
       const steps = workflowSteps(loadYaml(workflowPath), jobName);
       const guardIndex = steps.indexOf(guardStep(steps));
       const setupIndex = steps.indexOf(setupWpStep(steps));
@@ -131,21 +198,10 @@ describe("caller-selected wp runtime", () => {
       expect(setupIndex).toBeGreaterThan(guardIndex);
       const regex = guardRegex(guardRunScript(guardStep(steps)));
       for (const version of ACCEPTED_VERSIONS) {
-        expect(regex.test(version), `accept ${version}`).toBe(true);
+        expect(regexMatchesWholeInput(regex, version), `accept ${version}`).toBe(true);
       }
       for (const version of REJECTED_VERSIONS) {
-        expect(regex.test(version), `reject ${version}`).toBe(false);
-      }
-    });
-
-    it(`${shortName}: executes the embedded guard script through node`, () => {
-      const steps = workflowSteps(loadYaml(workflowPath), jobName);
-      const script = guardRunScript(guardStep(steps));
-      for (const version of ["0.0.6", "0.0.15"]) {
-        expect(runGuardScript(script, version), `accept ${version}`).toBe(0);
-      }
-      for (const version of ["latest", "01.2.3", "1.2.3++"]) {
-        expect(runGuardScript(script, version), `reject ${version}`).not.toBe(0);
+        expect(regexMatchesWholeInput(regex, version), `reject ${version}`).toBe(false);
       }
     });
 
@@ -157,4 +213,37 @@ describe("caller-selected wp runtime", () => {
       expect(with_["version"]).toBe("${{ inputs.wp_version }}");
     });
   }
+
+  it("executes each embedded guard across the complete version matrix", () => {
+    const versions = [...ACCEPTED_VERSIONS, ...REJECTED_VERSIONS];
+    const scripts = JOB_FOR_WORKFLOW.map(([workflowPath, jobName]) => {
+      const steps = workflowSteps(loadYaml(workflowPath), jobName);
+      return guardRunScript(guardStep(steps));
+    });
+    const statuses = runGuardScripts(scripts, versions);
+
+    for (const [workflowIndex, [workflowPath]] of JOB_FOR_WORKFLOW.entries()) {
+      const workflowStatuses = statuses[workflowIndex];
+      if (workflowStatuses === undefined) {
+        throw new Error(`missing Node statuses for ${workflowPath}`);
+      }
+      const shortName = workflowPath.replace(/^.*\//u, "");
+      for (const [index, version] of ACCEPTED_VERSIONS.entries()) {
+        expect(workflowStatuses[index], `${shortName}: accept ${version}`).toBe(0);
+      }
+      for (const [index, version] of REJECTED_VERSIONS.entries()) {
+        const statusIndex = ACCEPTED_VERSIONS.length + index;
+        expect(workflowStatuses[statusIndex], `${shortName}: reject ${version}`).not.toBe(0);
+      }
+    }
+  });
+
+  it("mirrors the pinned setup-wp version guard as a compatibility oracle", () => {
+    for (const version of ACCEPTED_VERSIONS) {
+      expect(PINNED_SETUP_WP_VERSION_GUARD.test(version), `accept ${version}`).toBe(true);
+    }
+    expect(PINNED_SETUP_WP_VERSION_GUARD.test("1.2.3-alpha.1")).toBe(true);
+    expect(PINNED_SETUP_WP_VERSION_GUARD.test("1.2.3+build.5")).toBe(true);
+    expect(PINNED_SETUP_WP_VERSION_GUARD.test("1.2.3-alpha.1+build.5")).toBe(false);
+  });
 });

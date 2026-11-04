@@ -49,7 +49,8 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 wp install contract (`setup-wp`):
 
 - every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
-- `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
+- `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver in stable `major.minor.patch` form, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
+- Each reusable workflow rejects leading zeroes, prerelease/build suffixes, ranges, whitespace, and floating tags before invoking `setup-wp`.
 - binaries come from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
 - supported assets are exactly `wp-linux-x64`, `wp-linux-arm64`, `wp-darwin-x64`, and `wp-darwin-arm64`
 - a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification, then attempts a best-effort seed of that same cache path
