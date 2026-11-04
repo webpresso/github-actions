@@ -41,7 +41,12 @@ function runScript(body: string, env: Readonly<Record<string, string>>) {
       ...env,
     },
   });
-  return { dir, result, githubPath: readFileSync(githubPath, "utf8"), githubEnv: readFileSync(githubEnv, "utf8") };
+  return {
+    dir,
+    result,
+    githubPath: readFileSync(githubPath, "utf8"),
+    githubEnv: readFileSync(githubEnv, "utf8"),
+  };
 }
 
 function runBody(index: number): string {
@@ -77,10 +82,14 @@ describe("setup-wp binary install", () => {
     expect(dig(action, "inputs", "release-repo", "default")).toBe("webpresso/app-releases");
 
     const script = installScript();
-    expect(script).toInclude('https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${asset}');
+    expect(script).toInclude(
+      "https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${asset}",
+    );
     expect(script).not.toInclude("api.github.com");
     expect(script, "the asset host redirects; curl must follow it").toInclude("curl -fsSL");
-    expect(code(script), "the runner image must not need a python3 for this").not.toInclude("python3");
+    expect(code(script), "the runner image must not need a python3 for this").not.toInclude(
+      "python3",
+    );
 
     // The install step must not be able to see a token at all: a public
     // download that quietly depends on one is how the private-repo coupling
@@ -93,7 +102,9 @@ describe("setup-wp binary install", () => {
     // Every published standalone binary prints 0.0.0 (it reports the product
     // axis from a package root it does not carry), so any equality assertion
     // against the pinned version is guaranteed to fail.
-    for (const body of steps.map((step) => step["run"]).filter((body): body is string => typeof body === "string")) {
+    for (const body of steps
+      .map((step) => step["run"])
+      .filter((body): body is string => typeof body === "string")) {
       expect(code(body)).not.toMatch(/wp\s+--version/u);
     }
   });
@@ -101,7 +112,9 @@ describe("setup-wp binary install", () => {
   it("short-circuits on the tool cache before touching the network", () => {
     const script = installScript();
     expect(script.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(script.indexOf("curl -fsSL"));
-    expect(script).toInclude('cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"');
+    expect(script).toInclude(
+      'cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"',
+    );
   });
 
   it("puts a cached wp on PATH without downloading anything", () => {
@@ -180,7 +193,7 @@ describe("setup-wp package root", () => {
     expect(body).not.toMatch(/\/tarball\//u);
     expect(body).not.toInclude("api.github.com");
     expect(action).not.toHaveProperty("inputs.github-token");
-    expect(dig(action, "inputs", "package-root-repo")).toBeUndefined();
-    expect(dig(action, "inputs", "package-root-ref")).toBeUndefined();
+    expect(dig(action, "inputs", "package-root-repo")).toBe(undefined);
+    expect(dig(action, "inputs", "package-root-ref")).toBe(undefined);
   });
 });

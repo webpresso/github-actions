@@ -27,8 +27,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # wp 0.0.13 is the latest published release whose guardrails run on this
+      # repository (qualified locally 2026-11-01; 0.0.11 crashes on
+      # #runtime/posix-ffi.js). Keep this step aligned when the qualification
+      # in webpresso/app#2983 publishes a newer runtime.
+      - uses: webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428
+        with:
+          version: "0.0.13"
+          package-root: true
+
+      # Guardrails reach this repository only while CI runs them here.
+      # Affected-scoped against the merge base: the PR diff is validated in
+      # full, while legacy completed records outside the diff keep their
+      # historical citation shapes (retired via blueprints/errata as needed).
+      - name: Guardrails
+        run: wp audit guardrails --affected --branch
 
       # Structural contracts over the workflow/action YAML (pins, permissions,
       # secret-sink scoping, toolchain wiring) plus behavioral contracts: the

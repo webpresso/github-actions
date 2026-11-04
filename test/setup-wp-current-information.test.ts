@@ -11,7 +11,8 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "7cc24562bdd020390449e004127ce33e015aea7dd0f97431b82337fe8ac213f4";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 =
+  "7cc24562bdd020390449e004127ce33e015aea7dd0f97431b82337fe8ac213f4";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
@@ -26,7 +27,9 @@ const steps = (() => {
 })();
 const installScript = digString(steps[0], "run") ?? "";
 const packageRootScript = digString(steps[1], "run") ?? "";
-const wpSection = readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ?? "";
+const wpSection =
+  readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ??
+  "";
 
 function withoutDescriptions(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutDescriptions);
@@ -46,12 +49,18 @@ describe("setup-wp current information", () => {
     expect(actionText).toInclude("no token");
 
     expect(wpSection).toInclude("public `webpresso/app-releases`");
-    expect(wpSection).toMatch(/exact (?:caller-pinned )?product semver.*independent of the pinned action SHA/iu);
-    expect(wpSection).not.toMatch(/github-token|GITHUB_TOKEN|private source monorepo|api\.github\.com/iu);
+    expect(wpSection).toMatch(
+      /exact (?:caller-pinned )?product semver.*independent of the pinned action SHA/iu,
+    );
+    expect(wpSection).not.toMatch(
+      /github-token|GITHUB_TOKEN|private source monorepo|api\.github\.com/iu,
+    );
   });
 
   it("M2 documents the complete action-supported assets and same-release package root", () => {
-    const binaryAssets = [...installScript.matchAll(/asset="(wp-(?:linux|darwin)-(?:x64|arm64))"/gu)]
+    const binaryAssets = [
+      ...installScript.matchAll(/asset="(wp-(?:linux|darwin)-(?:x64|arm64))"/gu),
+    ]
       .map((match) => match[1])
       .filter((asset): asset is string => asset !== undefined)
       .sort();
@@ -68,11 +77,15 @@ describe("setup-wp current information", () => {
       expect(wpSection).toInclude(asset ?? "missing package-root asset");
     }
     expect(wpSection).toMatch(/same release.*same version/iu);
-    expect(wpSection).not.toMatch(/source[- ]archive|\/tarball\/|private source monorepo|package-root-ref|token fallback/iu);
+    expect(wpSection).not.toMatch(
+      /source[- ]archive|\/tarball\/|private source monorepo|package-root-ref|token fallback/iu,
+    );
   });
 
   it("M3 documents cache-hit, download-miss, checksum, and best-effort seed ordering", () => {
-    expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(installScript.indexOf("curl -fsSL"));
+    expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(
+      installScript.indexOf("curl -fsSL"),
+    );
     expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf("WP_CHECKSUM"));
     expect(installScript).toInclude("Best effort");
 
@@ -80,7 +93,9 @@ describe("setup-wp current information", () => {
     expect(wpSection).toMatch(/cache miss.*direct release-asset URL/isu);
     expect(wpSection).toMatch(/caller-supplied.*sha256/isu);
     expect(wpSection).toMatch(/best-effort.*seed/isu);
-    expect(wpSection).not.toMatch(/actions\/cache|cache store|cache restore|automatic provenance|mandatory checksum/iu);
+    expect(wpSection).not.toMatch(
+      /actions\/cache|cache store|cache restore|automatic provenance|mandatory checksum/iu,
+    );
   });
 
   it("M4 documents current exports and fail-closed catalog behavior", () => {
@@ -114,10 +129,14 @@ describe("setup-wp current information", () => {
 
   it("action behavior boundary", () => {
     expect(
-      createHash("sha256").update(JSON.stringify(withoutDescriptions(action))).digest("hex"),
+      createHash("sha256")
+        .update(JSON.stringify(withoutDescriptions(action)))
+        .digest("hex"),
     ).toBe(SETUP_WP_ACTION_BEHAVIOR_SHA256);
     expect(
-      createHash("sha256").update(JSON.stringify(withoutDescriptions(toolchainAction))).digest("hex"),
+      createHash("sha256")
+        .update(JSON.stringify(withoutDescriptions(toolchainAction)))
+        .digest("hex"),
     ).toBe(ACTION_BEHAVIOR_SHA256);
   });
 });

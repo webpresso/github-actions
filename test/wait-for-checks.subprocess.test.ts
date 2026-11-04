@@ -95,7 +95,9 @@ type HelperOptions = {
 
 const RUN_URL = "https://github.com/webpresso/repo/actions/runs";
 
-function checkRun(overrides: Partial<CheckRunFixture> & { readonly name: string }): CheckRunFixture {
+function checkRun(
+  overrides: Partial<CheckRunFixture> & { readonly name: string },
+): CheckRunFixture {
   return {
     status: "completed",
     conclusion: "success",
@@ -190,7 +192,9 @@ describe("wait-for-checks success", () => {
   it("requires every context in a comma- and newline-separated list", () => {
     const result = runHelper({
       contexts: "quality, e2e\nsecurity",
-      polls: [[checkRun({ name: "quality" }), checkRun({ name: "e2e" }), checkRun({ name: "security" })]],
+      polls: [
+        [checkRun({ name: "quality" }), checkRun({ name: "e2e" }), checkRun({ name: "security" })],
+      ],
     });
     expect(result.status, result.output).toBe(0);
     expect(result.output).toInclude("all 3 context(s) succeeded");
@@ -264,7 +268,14 @@ describe("wait-for-checks success", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("wait-for-checks treats only `success` as a pass", () => {
-  for (const conclusion of ["failure", "cancelled", "timed_out", "action_required", "neutral", "stale"]) {
+  for (const conclusion of [
+    "failure",
+    "cancelled",
+    "timed_out",
+    "action_required",
+    "neutral",
+    "stale",
+  ]) {
     it(`fails on a "${conclusion}" conclusion`, () => {
       const result = runHelper({
         contexts: "wp-check",
@@ -322,8 +333,16 @@ describe("wait-for-checks same-name multiplicity", () => {
   // and `success`. Whichever the API happens to return first would decide the
   // gate — so a disagreement is an error, not a coin flip.
   const conflicting: readonly CheckRunFixture[] = [
-    checkRun({ name: "schema-codegen", conclusion: "skipped", details_url: `${RUN_URL}/111/job/1` }),
-    checkRun({ name: "schema-codegen", conclusion: "success", details_url: `${RUN_URL}/222/job/2` }),
+    checkRun({
+      name: "schema-codegen",
+      conclusion: "skipped",
+      details_url: `${RUN_URL}/111/job/1`,
+    }),
+    checkRun({
+      name: "schema-codegen",
+      conclusion: "success",
+      details_url: `${RUN_URL}/222/job/2`,
+    }),
   ];
 
   it("fails loudly, naming every conflicting run and its URL, instead of picking one", () => {
@@ -367,7 +386,12 @@ describe("wait-for-checks same-name multiplicity", () => {
       "222": { name: "CI", path: ".github/workflows/ci.yml" },
     } as const;
     for (const workflow of [".github/workflows/ci.yml", "CI"]) {
-      const result = runHelper({ contexts: "schema-codegen", polls: [conflicting], workflow, workflowRuns });
+      const result = runHelper({
+        contexts: "schema-codegen",
+        polls: [conflicting],
+        workflow,
+        workflowRuns,
+      });
       expect(result.status, `${workflow}: ${result.output}`).toBe(0);
     }
   });
@@ -393,7 +417,9 @@ describe("wait-for-checks same-name multiplicity", () => {
       contexts: "schema-codegen",
       polls: [[checkRun({ name: "schema-codegen", details_url: `${RUN_URL}/111/job/1` })]],
       workflow: "ci.yml",
-      workflowRuns: { "111": { name: "Preview Deploy", path: ".github/workflows/preview-deploy.yml" } },
+      workflowRuns: {
+        "111": { name: "Preview Deploy", path: ".github/workflows/preview-deploy.yml" },
+      },
       timeoutSeconds: "0.3",
     });
     expect(result.status).toBe(1);
@@ -521,14 +547,18 @@ describe("wait-for-checks action shape", () => {
     // NOT a bare `github.sha`: on a pull_request event that is the ephemeral
     // merge commit, which carries zero check runs — verified live, and caught
     // by this repo's own gate before the action shipped.
-    expect(dig(action, "inputs", "ref", "default")).toBe("${{ github.event.pull_request.head.sha || github.sha }}");
+    expect(dig(action, "inputs", "ref", "default")).toBe(
+      "${{ github.event.pull_request.head.sha || github.sha }}",
+    );
     expect(dig(action, "inputs", "repository", "default")).toBe("${{ github.repository }}");
     expect(dig(action, "inputs", "timeout-seconds", "default")).toBe("900");
     expect(dig(action, "inputs", "poll-interval-seconds", "default")).toBe("20");
     expect(dig(action, "inputs", "token", "default")).toBe("${{ github.token }}");
     expect(dig(action, "inputs", "workflow", "default")).toBe("");
     expect(dig(action, "outputs", "states", "value")).toBe("${{ steps.wait.outputs.states }}");
-    expect(actionSteps[0]?.["id"], "the states output must be wired to a real step id").toBe("wait");
+    expect(actionSteps[0]?.["id"], "the states output must be wired to a real step id").toBe(
+      "wait",
+    );
   });
 
   it("passes every caller-controlled value through env, never into the script body", () => {
@@ -573,12 +603,14 @@ describe("self-test.yml exercises the action against the live API", () => {
   const jobs = asRecord(dig(selfTest, "jobs"), "jobs");
 
   function localActionSteps(jobName: string): readonly YamlRecord[] {
-    return stepsOf(jobs[jobName]).filter((step) => step["uses"] === "./.github/actions/wait-for-checks");
+    return stepsOf(jobs[jobName]).filter(
+      (step) => step["uses"] === "./.github/actions/wait-for-checks",
+    );
   }
 
   it("waits on a real green check produced earlier in the same run", () => {
     const job = jobs["wait-for-checks-success"];
-    expect(job, "expected a `wait-for-checks-success` job").toBeDefined();
+    expect(job, "expected a `wait-for-checks-success` job").not.toBe(undefined);
     expect(dig(job, "needs")).toBe("contract-tests");
     expect(dig(job, "permissions", "checks")).toBe("read");
     const steps = localActionSteps("wait-for-checks-success");
@@ -588,7 +620,7 @@ describe("self-test.yml exercises the action against the live API", () => {
 
   it("proves the bounded never-observed failure against the live API", () => {
     const job = jobs["wait-for-checks-bounded-failure"];
-    expect(job, "expected a `wait-for-checks-bounded-failure` job").toBeDefined();
+    expect(job, "expected a `wait-for-checks-bounded-failure` job").not.toBe(undefined);
     expect(dig(job, "permissions", "checks")).toBe("read");
     const steps = localActionSteps("wait-for-checks-bounded-failure");
     expect(steps.length).toBe(1);
@@ -598,7 +630,9 @@ describe("self-test.yml exercises the action against the live API", () => {
 
     // The assertion step must check the outcome, the elapsed bound, and that
     // the message distinguished a never-observed context from a pending one.
-    const assertion = stepsOf(jobs["wait-for-checks-bounded-failure"]).find((step) => step["id"] === "assert");
+    const assertion = stepsOf(jobs["wait-for-checks-bounded-failure"]).find(
+      (step) => step["id"] === "assert",
+    );
     const body = typeof assertion?.["run"] === "string" ? assertion["run"] : "";
     expect(body).toInclude("NEVER OBSERVED");
     expect(body).toInclude("failure");

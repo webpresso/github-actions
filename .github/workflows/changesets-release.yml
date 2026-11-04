@@ -45,6 +45,11 @@ on:
         required: false
         default: ubuntu-latest
         type: string
+      wp_version:
+        description: "Exact stable wp version (major.minor.patch only; no suffixes, ranges, or floating tags)"
+        required: false
+        default: "0.0.6"
+        type: string
     outputs:
       published:
         description: "Whether the post-version release preparation path ran"
@@ -123,9 +128,16 @@ jobs:
         with:
           package-manager-cache: "false"
 
+      - name: Validate wp_version input
+        shell: bash
+        env:
+          WP_VERSION_INPUT: ${{ inputs.wp_version }}
+        run: |
+          node -e 'const v = process.env.WP_VERSION_INPUT; const stableVersion = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(v); const ok = stableVersion !== null && stableVersion[0].length === v.length; if (!ok) { console.error(`wp_version must be an exact stable major.minor.patch version (no leading zeros, suffixes, ranges, whitespace, or v prefix), got "${v}"`); process.exit(1); }'
+
       - uses: webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428
         with:
-          version: "0.0.6"
+          version: ${{ inputs.wp_version }}
 
       - name: Install caller dependencies
         shell: bash
@@ -153,7 +165,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HUSKY: '0'
+          HUSKY: "0"
           RELEASE_PUBLISH_RESULT_FILE: ${{ runner.temp }}/release-publish-result.json
 
       - name: Read explicit release-prep result
