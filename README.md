@@ -47,12 +47,12 @@ Shared toolchain action (`setup-webpresso-toolchain`):
 wp install contract (`setup-wp`):
 - every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
 - `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
-- binaries come from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
-- supported assets are exactly `wp-linux-x64`, `wp-linux-arm64`, `wp-darwin-x64`, and `wp-darwin-arm64`
-- a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification, then attempts a best-effort seed of that same cache path
+- `wp` comes from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
+- one install archive per target: supported assets are exactly `wp-linux-x64.tar.gz`, `wp-linux-arm64.tar.gz`, `wp-darwin-x64.tar.gz`, and `wp-darwin-arm64.tar.gz`, each with a digest sidecar (`wp-<target>.tar.gz.json`); the archive sha256 is verified against the sidecar (`archive`, `version`, `target` must also match) and the action fails with a named error on any mismatch; `bin/wp` is extracted from the archive
+- a version-directory tool-cache hit skips both the download and checksum verification; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification of the extracted `bin/wp` (not of the archive), then attempts a best-effort seed of that same cache path
 - the cache is keyed on the version directory, never on `wp --version`; a standalone binary cannot reliably identify its release version
 - `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
-- `package-root: true` additionally downloads `wp-package-root.tgz` from the same release and same version as the binary; it exports `WEBPRESSO_PACKAGE_ROOT` and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
+- `package-root: true` additionally extracts `package-root/` from the same archive, so the same release and same version as the binary with no second download; it exports `WEBPRESSO_PACKAGE_ROOT` and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
 - consumers update the reusable-workflow commit SHA and pinned product version independently
 
 ## Gating on test outcomes (`wait-for-checks`)

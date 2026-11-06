@@ -2,7 +2,9 @@ name: Setup global wp
 description: >
   Put a caller-pinned wp release binary on PATH. Prefers a wp already baked into
   the runner's @actions/tool-cache layout; otherwise downloads the published
-  binary from the PUBLIC webpresso/app-releases repository -- no GitHub API
+  install archive wp-<target>.tar.gz (plus its wp-<target>.tar.gz.json digest
+  sidecar) from the PUBLIC webpresso/app-releases repository, verifies the
+  archive sha256 against the sidecar, and extracts bin/wp -- no GitHub API
   call, no token, no python3.
 
 inputs:
@@ -13,35 +15,37 @@ inputs:
     required: true
   release-repo:
     description: >
-      owner/repo publishing the wp release binaries. Defaults to the public
+      owner/repo publishing the wp install archives. Defaults to the public
       webpresso/app-releases; override only to install from a mirror.
     required: false
     default: webpresso/app-releases
   checksum:
     description: >
-      Optional sha256 of the downloaded binary. When set, the download is
-      verified against it and the action fails on a mismatch. Ignored on a
-      tool-cache hit (that binary was provisioned by the runner image).
+      Optional sha256 of the extracted bin/wp binary (not of the archive; the
+      archive is always verified against its release sidecar). When set, the
+      binary is verified against it and the action fails on a mismatch. Ignored
+      on a tool-cache hit (that binary was provisioned by the runner image).
     required: false
     default: ""
   package-root:
     description: >
-      Also install wp-package-root.tgz from the same public release as the
+      Also extract package-root/ from the SAME wp-<target>.tar.gz archive as the
       binary and export WEBPRESSO_PACKAGE_ROOT and NODE_PATH. Requires no
-      token or second version and fails closed when the extracted root has
-      no catalog/. Requires wp >= 0.0.5.
+      token, no second download and no second version, and fails closed when
+      the extracted root has no catalog/. Requires wp >= 0.0.5.
     required: false
     default: "false"
 
 runs:
   using: composite
   steps:
-    - name: Install wp binary from the public release repository
+    - name: Install wp from the public release repository
       shell: bash
       env:
         WP_VERSION: ${{ inputs.version }}
         WP_RELEASE_REPO: ${{ inputs.release-repo }}
         WP_CHECKSUM: ${{ inputs.checksum }}
+        WP_PACKAGE_ROOT: ${{ inputs.package-root }}
       run: |
         set -euo pipefail
 
@@ -53,15 +57,25 @@ runs:
         os="$(uname -s)"
         arch="$(uname -m)"
         case "${os}/${arch}" in
-          Linux/x86_64|Linux/amd64)   asset="wp-linux-x64";    tool_arch="x64" ;;
-          Linux/aarch64|Linux/arm64)  asset="wp-linux-arm64";  tool_arch="arm64" ;;
-          Darwin/x86_64)              asset="wp-darwin-x64";   tool_arch="x64" ;;
-          Darwin/arm64)               asset="wp-darwin-arm64"; tool_arch="arm64" ;;
+          Linux/x86_64|Linux/amd64)   target="linux-x64";    tool_arch="x64" ;;
+          Linux/aarch64|Linux/arm64)  target="linux-arm64";  tool_arch="arm64" ;;
+          Darwin/x86_64)              target="darwin-x64";   tool_arch="x64" ;;
+          Darwin/arm64)               target="darwin-arm64"; tool_arch="arm64" ;;
           *)
             echo "::error::unsupported runner platform '${os}/${arch}'"
             exit 3
             ;;
         esac
+
+        if [[ "${WP_PACKAGE_ROOT}" == "true" ]]; then
+          # wp <= 0.0.4 located the package root only through a retired env
+          # name this action no longer exports, so those binaries cannot find it.
+          IFS=. read -r major minor patch <<< "${WP_VERSION%%[+-]*}"
+          if (( major == 0 && minor == 0 && patch < 5 )); then
+            echo "::error::package-root: true requires wp >= 0.0.5, got '${WP_VERSION}'"
+            exit 12
+          fi
+        fi
 
         # Cache short-circuit. Keyed on the tool-cache VERSION DIRECTORY only:
         # `wp --version` reports the product axis from a package root the
@@ -69,118 +83,128 @@ runs:
         # 0.0.0 and can never identify itself. The directory name is the only
         # honest provenance signal, and it is what the runner image writes.
         cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"
+        cache_hit=false
         if [[ -x "${cache_root}/wp" ]]; then
+          cache_hit=true
           echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
           echo "${cache_root}" >> "${GITHUB_PATH}"
           echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
+          if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
+            exit 0
+          fi
+        fi
+
+        sha256_of() {
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$1" | cut -d' ' -f1
+          else
+            shasum -a 256 "$1" | cut -d' ' -f1
+          fi
+        }
+
+        # Flat string field out of the one-object sidecar JSON, without python.
+        json_field() {
+          sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$2" | head -n 1
+        }
+
+        # ONE contract: a single install archive per target plus a digest
+        # sidecar. Public release assets: plain redirecting downloads, no API
+        # and no token. -L is mandatory -- GitHub 302s release assets to a
+        # signed asset host, and without it curl reports the redirect as a
+        # failure.
+        archive_name="wp-${target}.tar.gz"
+        sidecar_name="${archive_name}.json"
+        base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"
+        work_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp-archive"
+        rm -rf "${work_dir}"
+        mkdir -p "${work_dir}/stage"
+
+        for name in "${archive_name}" "${sidecar_name}"; do
+          echo "setup-wp: downloading ${base_url}/${name}"
+          if ! curl -fsSL --retry 3 --retry-delay 2 -o "${work_dir}/${name}" "${base_url}/${name}"; then
+            echo "::error::download failed for ${base_url}/${name} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${name}?"
+            exit 6
+          fi
+        done
+
+        sidecar="${work_dir}/${sidecar_name}"
+        for pair in "archive:${archive_name}" "version:${WP_VERSION}" "target:${target}"; do
+          field="${pair%%:*}"
+          want="${pair#*:}"
+          got="$(json_field "${field}" "${sidecar}")"
+          if [[ "${got}" != "${want}" ]]; then
+            echo "::error::sidecar ${sidecar_name} ${field} mismatch: expected '${want}', got '${got}'"
+            exit 7
+          fi
+        done
+
+        expected_sha="$(json_field sha256 "${sidecar}")"
+        actual_sha="$(sha256_of "${work_dir}/${archive_name}")"
+        if [[ -z "${expected_sha}" || "${actual_sha}" != "${expected_sha}" ]]; then
+          echo "::error::sha256 mismatch for ${archive_name}: sidecar says '${expected_sha}', archive is ${actual_sha}"
+          exit 8
+        fi
+        echo "setup-wp: archive sha256 verified against sidecar"
+
+        stage="${work_dir}/stage"
+        tar -xzf "${work_dir}/${archive_name}" -C "${stage}"
+
+        if [[ "${cache_hit}" != "true" ]]; then
+          if [[ ! -f "${stage}/bin/wp" ]]; then
+            echo "::error::${archive_name} has no bin/wp"
+            exit 9
+          fi
+
+          install_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp"
+          mkdir -p "${install_dir}"
+          cp "${stage}/bin/wp" "${install_dir}/wp"
+          chmod +x "${install_dir}/wp"
+
+          if [[ -n "${WP_CHECKSUM}" ]]; then
+            actual="$(sha256_of "${install_dir}/wp")"
+            if [[ "${actual}" != "${WP_CHECKSUM}" ]]; then
+              echo "::error::sha256 mismatch for bin/wp from ${archive_name}: expected ${WP_CHECKSUM}, got ${actual}"
+              exit 5
+            fi
+            echo "setup-wp: sha256 verified"
+          fi
+
+          # Populate the tool cache so a later job on the same runner (and any
+          # consumer probing the same path) short-circuits. Best effort: the
+          # cache root is root-owned on some images, and failing to seed it is
+          # not a reason to fail an otherwise successful install.
+          if mkdir -p "${cache_root}" 2>/dev/null &&
+             cp "${install_dir}/wp" "${cache_root}/wp.tmp" 2>/dev/null &&
+             mv "${cache_root}/wp.tmp" "${cache_root}/wp" 2>/dev/null; then
+            chmod +x "${cache_root}/wp" || true
+            touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
+            echo "setup-wp: seeded tool cache at ${cache_root}"
+          fi
+
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
+          echo "setup-wp: installed wp ${WP_VERSION} (${archive_name}) to ${install_dir}"
+        fi
+
+        if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
           exit 0
         fi
 
-        install_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp"
-        mkdir -p "${install_dir}"
-
-        # Public release asset: a plain redirecting download, no API and no
-        # token. -L is mandatory -- GitHub 302s release assets to a signed
-        # asset host, and without it curl reports the redirect as a failure.
-        url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${asset}"
-        echo "setup-wp: tool-cache miss; downloading ${url}"
-        if ! curl -fsSL --retry 3 --retry-delay 2 -o "${install_dir}/wp" "${url}"; then
-          echo "::error::download failed for ${url} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${asset}?"
-          exit 6
-        fi
-        chmod +x "${install_dir}/wp"
-
-        # A truncated or HTML body would still be "executable"; the real
-        # binaries are ~100MB, so anything tiny is a failed download.
-        size="$(wc -c < "${install_dir}/wp" | tr -d ' ')"
-        if [[ "${size}" -lt 1048576 ]]; then
-          echo "::error::downloaded ${asset} is only ${size} bytes; not a wp binary"
-          exit 4
-        fi
-
-        if [[ -n "${WP_CHECKSUM}" ]]; then
-          if command -v sha256sum >/dev/null 2>&1; then
-            actual="$(sha256sum "${install_dir}/wp" | cut -d' ' -f1)"
-          else
-            actual="$(shasum -a 256 "${install_dir}/wp" | cut -d' ' -f1)"
-          fi
-          if [[ "${actual}" != "${WP_CHECKSUM}" ]]; then
-            echo "::error::sha256 mismatch for ${asset}: expected ${WP_CHECKSUM}, got ${actual}"
-            exit 5
-          fi
-          echo "setup-wp: sha256 verified"
-        fi
-
-        # Populate the tool cache so a later job on the same runner (and any
-        # consumer probing the same path) short-circuits. Best effort: the
-        # cache root is root-owned on some images, and failing to seed it is
-        # not a reason to fail an otherwise successful install.
-        if mkdir -p "${cache_root}" 2>/dev/null &&
-           cp "${install_dir}/wp" "${cache_root}/wp.tmp" 2>/dev/null &&
-           mv "${cache_root}/wp.tmp" "${cache_root}/wp" 2>/dev/null; then
-          chmod +x "${cache_root}/wp" || true
-          touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
-          echo "setup-wp: seeded tool cache at ${cache_root}"
-        fi
-
-        echo "${install_dir}" >> "${GITHUB_PATH}"
-        echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
-        echo "setup-wp: installed wp ${WP_VERSION} (${asset}) to ${install_dir}"
-
-    - name: Install wp package root
-      if: ${{ inputs.package-root == 'true' }}
-      shell: bash
-      env:
-        WP_VERSION: ${{ inputs.version }}
-        WP_RELEASE_REPO: ${{ inputs.release-repo }}
-        PACKAGE_ROOT_ASSET: wp-package-root.tgz
-      run: |
-        set -euo pipefail
-
-        # wp <= 0.0.4 located the package root only through a retired env
-        # name this step no longer exports, so those binaries cannot find it.
-        IFS=. read -r major minor patch <<< "${WP_VERSION%%[+-]*}"
-        if (( major == 0 && minor == 0 && patch < 5 )); then
-          echo "::error::package-root: true requires wp >= 0.0.5, got '${WP_VERSION}'"
-          exit 12
-        fi
-
-        # One source, one version, no credential: the package root ships as an
-        # asset on the SAME public release as the binary it belongs to.
-        #
-        # This deliberately has no fallback. The previous implementation read
-        # the private source monorepo, which forced a cross-repo token AND a pin
-        # to the retired 3.x line, because the public 0.0.x line has no matching
-        # source tag. Keeping that as a "fallback" would have preserved both
-        # problems and let a misconfigured caller drift back onto the retired
-        # line silently. If the asset is missing, that is a publishing bug and
-        # it should say so.
+        # The package root is the package-root/ tree of the SAME archive: one
+        # source, one version, no credential, no second download. No fallback:
+        # if the archive lacks it, that is a publishing bug and it should say so.
         package_root="${RUNNER_TEMP:-/tmp}/webpresso-wp-package-root"
         rm -rf "${package_root}"
-        mkdir -p "${package_root}"
-
-        url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${PACKAGE_ROOT_ASSET}"
-        if ! curl -fsSL --retry 3 --retry-delay 2 \
-             -o "${RUNNER_TEMP:-/tmp}/${PACKAGE_ROOT_ASSET}" "${url}"; then
-          echo "::error::${WP_RELEASE_REPO} v${WP_VERSION} does not publish ${PACKAGE_ROOT_ASSET}."
-          echo "package-root: true needs it. The release workflow must mirror the package tarball alongside the binaries."
+        if [[ ! -d "${stage}/package-root" ]]; then
+          echo "::error::${archive_name} has no package-root/."
           exit 11
         fi
+        mv "${stage}/package-root" "${package_root}"
 
-        tar -xzf "${RUNNER_TEMP:-/tmp}/${PACKAGE_ROOT_ASSET}" -C "${package_root}"
-        # npm pack nests everything under package/; flatten so the root is the
-        # package root itself.
-        if [[ -d "${package_root}/package" ]]; then
-          shopt -s dotglob
-          mv "${package_root}/package"/* "${package_root}/"
-          rmdir "${package_root}/package"
-          shopt -u dotglob
-        fi
-
-        # Fail on the thing callers actually depend on, not just on "a tarball
+        # Fail on the thing callers actually depend on, not just on "an archive
         # extracted". A package root without catalog/ resolves nothing.
         if [[ ! -d "${package_root}/catalog" ]]; then
-          echo "::error::${PACKAGE_ROOT_ASSET} extracted but has no catalog/; wp setup/sync/audit would fail to resolve templates."
+          echo "::error::${archive_name} package-root/ has no catalog/; wp setup/sync/audit would fail to resolve templates."
           exit 12
         fi
 
