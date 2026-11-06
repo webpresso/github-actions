@@ -11,7 +11,7 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "e8391953d4be5df509e7bf9efbad84685633c3e2c4d5eaf7f35eb1db495ffeef";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "9ee885db2620287a5e0a09f2360d744237bc0b8bbfb1fe9bc455d56e9f88051c";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
@@ -70,7 +70,7 @@ describe("setup-wp current information", () => {
 
   it("M3 documents cache-hit, download-miss, checksum, and best-effort seed ordering", () => {
     expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(installScript.indexOf("curl -fsSL"));
-    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf("WP_CHECKSUM"));
+    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf('sha256_of "${install_dir}/wp"'));
     expect(installScript).toInclude("Best effort");
 
     expect(wpSection).toMatch(/cache hit.*skips? (?:both )?(?:the )?download.*checksum/isu);

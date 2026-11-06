@@ -29,8 +29,9 @@ inputs:
       archive is always verified against its release sidecar, which is not an
       independent trust root; pin this for high-assurance installs. It does
       not cover package-root/). When set, the
-      binary is verified against it and the action fails on a mismatch. Ignored
-      on a tool-cache hit (that binary was provisioned by the runner image).
+      binary is verified against it and the action fails on a mismatch. On a
+      tool-cache hit the cached wp is verified against it instead (exit 16 on
+      a mismatch); without it a cached wp is trusted as provisioned.
     required: false
     default: ""
   package-root:
@@ -83,6 +84,14 @@ runs:
           fi
         fi
 
+        sha256_of() {
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$1" | cut -d' ' -f1
+          else
+            shasum -a 256 "$1" | cut -d' ' -f1
+          fi
+        }
+
         # Cache short-circuit. Keyed on the tool-cache VERSION DIRECTORY only:
         # `wp --version` reports the product axis from a package root the
         # standalone binary does not have, so every release binary prints
@@ -93,20 +102,20 @@ runs:
         if [[ -x "${cache_root}/wp" ]]; then
           cache_hit=true
           echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
+          if [[ -n "${WP_CHECKSUM}" ]]; then
+            cached_actual="$(sha256_of "${cache_root}/wp")"
+            if [[ "${cached_actual}" != "${WP_CHECKSUM}" ]]; then
+              echo "::error::sha256 mismatch for cached wp ${cache_root}/wp: expected ${WP_CHECKSUM}, got ${cached_actual}"
+              exit 16
+            fi
+            echo "setup-wp: cached wp sha256 verified"
+          fi
           echo "${cache_root}" >> "${GITHUB_PATH}"
           echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
           if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
             exit 0
           fi
         fi
-
-        sha256_of() {
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$1" | cut -d' ' -f1
-          else
-            shasum -a 256 "$1" | cut -d' ' -f1
-          fi
-        }
 
         # Flat string field out of the one-object sidecar JSON, without python.
         json_field() {
@@ -185,6 +194,14 @@ runs:
           esac
         done < "${names_list}"
         while IFS= read -r line; do
+          # bsdtar lists a ustar hardlink that claims data as a regular file
+          # with a trailing "link to <target>"; refuse any link annotation.
+          case "${line}" in
+            *" link to "*|*" -> "*)
+              echo "::error::${archive_name} has a link entry '${line}'; refusing to extract"
+              exit 13
+              ;;
+          esac
           case "${line:0:1}" in
             -|d) ;;
             *)
@@ -202,6 +219,17 @@ runs:
             exit 14
           fi
         done
+
+        # Listing text can be wrong (see above), so also inspect what actually
+        # landed: only regular, singly-linked files and directories may exist.
+        stray="$(find "${stage}" ! -type f ! -type d -print -quit)"
+        if [[ -z "${stray}" ]]; then
+          stray="$(find "${stage}" -type f -links +1 -print -quit)"
+        fi
+        if [[ -n "${stray}" ]]; then
+          echo "::error::${archive_name} extracted a non-regular or hard-linked entry '${stray}'; refusing to install"
+          exit 14
+        fi
 
         if [[ "${cache_hit}" != "true" ]]; then
           if [[ ! -f "${stage}/bin/wp" ]]; then

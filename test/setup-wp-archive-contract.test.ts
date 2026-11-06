@@ -43,15 +43,25 @@ function sha256(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-type TarEntryType = "file" | "dir" | "symlink" | "hardlink" | "chardev";
+type TarEntryType = "file" | "dir" | "symlink" | "hardlink" | "chardev" | "blockdev" | "fifo" | "pax";
 type TarEntry = {
   readonly name: string;
   readonly type: TarEntryType;
   readonly content?: string;
   readonly linkname?: string;
+  /** Header size field when it must differ from the body length (e.g. a hardlink that claims data). */
+  readonly size?: number;
 };
 
-const TAR_TYPEFLAG: Record<TarEntryType, string> = { file: "0", dir: "5", symlink: "2", hardlink: "1", chardev: "3" };
+const TAR_TYPEFLAG: Record<TarEntryType, string> = { file: "0", dir: "5", symlink: "2", hardlink: "1", chardev: "3", blockdev: "4", fifo: "6", pax: "x" };
+
+/** One pax extended-header record, with its self-inclusive decimal length prefix. */
+function paxRecord(key: string, value: string): string {
+  const rest = ` ${key}=${value}\n`;
+  let length = rest.length;
+  while (`${length}${rest}`.length !== length) length += 1;
+  return `${length}${rest}`;
+}
 
 /** Minimal ustar writer: lets a test emit entries the `tar` CLI refuses to create (`../x`, `/abs`). */
 function tarGz(entries: readonly TarEntry[]): Buffer {
@@ -63,7 +73,7 @@ function tarGz(entries: readonly TarEntry[]): Buffer {
     header.write(entry.type === "dir" ? "0000755\0" : "0000644\0", 100);
     header.write("0000000\0", 108);
     header.write("0000000\0", 116);
-    header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
+    header.write(`${(entry.size ?? body.length).toString(8).padStart(11, "0")}\0`, 124);
     header.write("00000000000\0", 136);
     header.write("        ", 148);
     header.write(TAR_TYPEFLAG[entry.type], 156);
@@ -98,6 +108,8 @@ type FixtureOptions = {
   readonly sidecarOverrides?: Readonly<Record<string, string>>;
   /** Do not publish the sidecar, so the stub curl fails its download. */
   readonly omitSidecar?: boolean;
+  /** Replace the archive with these exact bytes (sidecar digest is computed over them). */
+  readonly archiveBytes?: Buffer;
 };
 
 /** Build the release asset directory the stub `curl` serves from. */
@@ -109,6 +121,7 @@ function buildFixture({
   sidecarText,
   sidecarOverrides,
   omitSidecar = false,
+  archiveBytes,
 }: FixtureOptions): string {
   const root = makeTempDir("setup-wp-fixture-");
   const content = join(root, "content");
@@ -122,7 +135,9 @@ function buildFixture({
   const assets = join(root, "assets");
   mkdirSync(assets);
   const archivePath = join(assets, archiveName(target));
-  if (entries === undefined) {
+  if (archiveBytes !== undefined) {
+    writeFileSync(archivePath, archiveBytes);
+  } else if (entries === undefined) {
     const tar = spawnSync("tar", ["-czf", archivePath, "-C", content, "bin", "package-root", "manifest.json"], {
       encoding: "utf8",
     });
@@ -150,15 +165,18 @@ function buildFixture({
  * benign archive but, on extraction, plants a symlink at `$PLANT` inside the
  * stage dir, to exercise the post-extraction guard independently of the listing.
  */
-type TarStub = "record" | "plant-bin-wp" | "plant-package-root";
+type TarStub = "record" | "plant-bin-wp" | "plant-package-root" | "plant-hardlink" | "plant-fifo";
 
 function tarStubScript(mode: TarStub): string {
   const lines = ['#!/bin/bash', 'echo "$*" >> "${TAR_LOG}"'];
   if (mode === "record") return `${lines.join("\n")}\nexit 0\n`;
-  const plant =
-    mode === "plant-bin-wp"
-      ? 'mkdir -p "${stage}/bin"; ln -s /bin/sh "${stage}/bin/wp"'
-      : 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln -s /tmp "${stage}/package-root"';
+  const plants: Record<Exclude<TarStub, "record">, string> = {
+    "plant-bin-wp": 'mkdir -p "${stage}/bin"; ln -s /bin/sh "${stage}/bin/wp"',
+    "plant-package-root": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln -s /tmp "${stage}/package-root"',
+    "plant-hardlink": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln "${stage}/bin/wp" "${stage}/bin/wp-alias"',
+    "plant-fifo": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; mkfifo "${stage}/bin/pipe"',
+  };
+  const plant = plants[mode];
   return [
     ...lines,
     'case "$1" in',
@@ -206,6 +224,8 @@ type RunOptions = FixtureOptions & {
   readonly packageRoot?: boolean;
   readonly checksum?: string;
   readonly tarStub?: TarStub;
+  /** Pre-seed the runner tool cache with this wp binary body (a tool-cache hit). */
+  readonly cachedBin?: string;
 };
 
 function runAction(options: RunOptions) {
@@ -218,6 +238,12 @@ function runAction(options: RunOptions) {
   const curlLog = join(dir, "curl.log");
   const tarLog = join(dir, "tar.log");
   for (const file of [githubPath, githubEnv, curlLog, tarLog]) writeFileSync(file, "");
+  if (options.cachedBin !== undefined) {
+    const cacheRoot = join(dir, "toolcache", "wp", VERSION, "x64");
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(join(cacheRoot, "wp"), options.cachedBin);
+    chmodSync(join(cacheRoot, "wp"), 0o755);
+  }
   const scriptPath = join(dir, "step.sh");
   writeFileSync(scriptPath, installScript);
   const result = spawnSync("bash", [scriptPath], {
@@ -371,24 +397,40 @@ describe("setup-wp install archive contract", () => {
   describe("hostile archives are refused before extraction", () => {
     const escapeDir = makeTempDir("setup-wp-escape-");
     const absoluteTarget = join(escapeDir, "absolute-escape");
-    const hostile: readonly (readonly [string, TarEntry, string])[] = [
-      ["symlink", { name: "evil-link", type: "symlink", linkname: "/etc/passwd" }, "evil-link"],
-      ["hardlink", { name: "evil-hard", type: "hardlink", linkname: "bin/wp" }, "evil-hard"],
-      ["device", { name: "evil-dev", type: "chardev" }, "evil-dev"],
-      ["../ traversal", { name: "../escape", type: "file", content: "pwn\n" }, "../escape"],
-      ["nested ../ traversal", { name: "bin/../../escape", type: "file", content: "pwn\n" }, "bin/../../escape"],
-      ["absolute-path", { name: absoluteTarget, type: "file", content: "pwn\n" }, absoluteTarget],
+    const injected: TarEntry = { name: "innocent", type: "file", content: "x\n" };
+    const hostile: readonly (readonly [string, readonly TarEntry[], string])[] = [
+      ["symlink", [{ name: "evil-link", type: "symlink", linkname: "/etc/passwd" }], "evil-link"],
+      ["hardlink", [{ name: "evil-hard", type: "hardlink", linkname: "bin/wp" }], "evil-hard"],
+      [
+        "hardlink with a non-zero size field (bsdtar lists it as a regular file)",
+        [{ name: "evil-hard", type: "hardlink", linkname: "bin/wp", size: 5 }],
+        "evil-hard",
+      ],
+      ["character device", [{ name: "evil-dev", type: "chardev" }], "evil-dev"],
+      ["block device", [{ name: "evil-blk", type: "blockdev" }], "evil-blk"],
+      ["fifo", [{ name: "evil-fifo", type: "fifo" }], "evil-fifo"],
+      ["../ traversal", [{ name: "../escape", type: "file", content: "pwn\n" }], "../escape"],
+      ["nested ../ traversal", [{ name: "bin/../../escape", type: "file", content: "pwn\n" }], "bin/../../escape"],
+      ["bare .. entry", [{ name: "..", type: "dir" }], ".."],
+      ["./../ traversal", [{ name: "./../escape", type: "file", content: "pwn\n" }], "./../escape"],
+      [
+        "pax path override",
+        [{ name: "PaxHeader/x", type: "pax", content: paxRecord("path", "../escape") }, injected],
+        "../escape",
+      ],
+      ["name containing ' -> '", [{ name: "a -> b", type: "file", content: "x\n" }], "a -> b"],
+      ["name containing ' link to '", [{ name: "a link to b", type: "file", content: "x\n" }], "a link to b"],
+      ["absolute-path", [{ name: absoluteTarget, type: "file", content: "pwn\n" }], absoluteTarget],
     ];
 
-    for (const [label, entry, shown] of hostile) {
+    for (const [label, extra, shown] of hostile) {
       it(`refuses a ${label} entry with exit 13 and writes nothing`, () => {
-        const run = runAction({ target: "linux-x64", packageRoot: true, entries: [...GOOD_ENTRIES, entry] });
+        const run = runAction({ target: "linux-x64", packageRoot: true, entries: [...GOOD_ENTRIES, ...extra] });
         expect(run.result.status, run.output).toBe(13);
         expect(run.output).toInclude("::error::wp-linux-x64.tar.gz has");
         expect(run.output).toInclude("refusing to extract");
         expect(run.output).toInclude(shown);
         expect(readdirSync(run.stage)).toStrictEqual([]);
-        expect(existsSync(join(run.dir, "webpresso-archive-escape"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-archive", "escape"))).toBe(false);
         expect(existsSync(absoluteTarget)).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
@@ -397,13 +439,35 @@ describe("setup-wp install archive contract", () => {
       });
     }
 
-    it("names the entry kind in the symlink, hardlink and traversal errors", () => {
-      const run = runAction({
-        target: "linux-x64",
-        entries: [...GOOD_ENTRIES, { name: "evil-link", type: "symlink", linkname: "bin/wp" }],
-      });
-      expect(run.output).toInclude("non-regular entry (symlink, hardlink, or device)");
+    it("exits 15 on a corrupt archive and extracts nothing", () => {
+      const run = runAction({ target: "linux-x64", archiveBytes: Buffer.from("this is not a tar archive\n") });
+      expect(run.result.status, run.output).toBe(15);
+      expect(run.output).toInclude("::error::wp-linux-x64.tar.gz cannot be listed; refusing to extract");
+      expect(readdirSync(run.stage)).toStrictEqual([]);
+      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
     });
+
+    it("exits 15 on a truncated archive and extracts nothing", () => {
+      const whole = tarGz([...GOOD_ENTRIES, { name: "big", type: "file", content: "z".repeat(200_000) }]);
+      const run = runAction({ target: "linux-x64", archiveBytes: whole.subarray(0, Math.floor(whole.length / 2)) });
+      expect(run.result.status, run.output).toBe(15);
+      expect(readdirSync(run.stage)).toStrictEqual([]);
+      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+    });
+
+    for (const [what, mode] of [
+      ["a hard-linked file", "plant-hardlink"],
+      ["a fifo", "plant-fifo"],
+    ] as const) {
+      it(`refuses ${what} found in the stage after extraction with exit 14`, () => {
+        const run = runAction({ target: "linux-x64", packageRoot: true, tarStub: mode });
+        expect(run.result.status, run.output).toBe(14);
+        expect(run.output).toInclude("::error::wp-linux-x64.tar.gz extracted a non-regular or hard-linked entry");
+        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
+        expect(run.githubEnv).toBe("");
+      });
+    }
 
     for (const [label, mode] of [
       ["bin/wp", "plant-bin-wp"],
@@ -418,6 +482,31 @@ describe("setup-wp install archive contract", () => {
         expect(run.githubEnv).toBe("");
       });
     }
+  });
+
+  describe("tool-cache hit with a checksum input", () => {
+    const CACHED_BIN = "#!/bin/sh\necho cached wp\n";
+
+    it("accepts a cached binary that matches checksum", () => {
+      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, checksum: sha256(CACHED_BIN) });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.output).toInclude("cached wp sha256 verified");
+      expect(run.curlUrls).toStrictEqual([]);
+    });
+
+    it("exits 16 with a named error when the cached binary differs from checksum", () => {
+      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, checksum: "0".repeat(64) });
+      expect(run.result.status, run.output).toBe(16);
+      expect(run.output).toInclude("::error::sha256 mismatch for cached wp");
+      expect(run.curlUrls).toStrictEqual([]);
+      expect(run.githubEnv).toBe("");
+    });
+
+    it("still skips verification on a cache hit when no checksum is given", () => {
+      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.output).not.toInclude("sha256 verified");
+    });
   });
 
   it("verifies the archive sha256 before any extraction call", () => {
