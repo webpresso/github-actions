@@ -11,7 +11,7 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "38cb6ef7162e82086191e1994884b1098f6e7f0fcb26a8d2b106caade49d117c";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "e8391953d4be5df509e7bf9efbad84685633c3e2c4d5eaf7f35eb1db495ffeef";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);

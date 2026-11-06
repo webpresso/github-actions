@@ -5,7 +5,11 @@ description: >
   install archive wp-<target>.tar.gz (plus its wp-<target>.tar.gz.json digest
   sidecar) from the PUBLIC webpresso/app-releases repository, verifies the
   archive sha256 against the sidecar, and extracts bin/wp -- no GitHub API
-  call, no token, no python3.
+  call, no token, no python3. The sidecar digest is NOT an independent trust
+  root (both files come from the same release location): it guards against
+  corruption and partial downloads, not a compromised release repository or a
+  mirror set through release-repo. High-assurance consumers should pin the
+  checksum input.
 
 inputs:
   version:
@@ -22,7 +26,9 @@ inputs:
   checksum:
     description: >
       Optional sha256 of the extracted bin/wp binary (not of the archive; the
-      archive is always verified against its release sidecar). When set, the
+      archive is always verified against its release sidecar, which is not an
+      independent trust root; pin this for high-assurance installs. It does
+      not cover package-root/). When set, the
       binary is verified against it and the action fails on a mismatch. Ignored
       on a tool-cache hit (that binary was provisioned by the runner image).
     required: false
@@ -146,8 +152,56 @@ runs:
         fi
         echo "setup-wp: archive sha256 verified against sidecar"
 
+        # Refuse a hostile archive BEFORE the first extraction writes anything.
+        # The sidecar proves integrity only, so the archive content is still
+        # untrusted: only regular files and directories under relative,
+        # dot-dot-free paths may pass. Two listings (names, then verbose types)
+        # work identically on GNU tar and bsdtar; their line counts must agree
+        # or the listing is ambiguous (e.g. a newline in a name) and is refused.
         stage="${work_dir}/stage"
+        names_list="${work_dir}/entries.names"
+        kinds_list="${work_dir}/entries.kinds"
+        if ! tar -tzf "${work_dir}/${archive_name}" > "${names_list}" ||
+           ! tar -tzvf "${work_dir}/${archive_name}" > "${kinds_list}"; then
+          echo "::error::${archive_name} cannot be listed; refusing to extract"
+          exit 15
+        fi
+        if [[ "$(wc -l < "${names_list}")" -ne "$(wc -l < "${kinds_list}")" ]]; then
+          echo "::error::${archive_name} has an ambiguous entry listing; refusing to extract"
+          exit 13
+        fi
+        while IFS= read -r entry; do
+          case "${entry}" in
+            /*)
+              echo "::error::${archive_name} has an absolute-path entry '${entry}'; refusing to extract"
+              exit 13
+              ;;
+          esac
+          case "/${entry}/" in
+            */../*)
+              echo "::error::${archive_name} has a path-traversal entry '${entry}'; refusing to extract"
+              exit 13
+              ;;
+          esac
+        done < "${names_list}"
+        while IFS= read -r line; do
+          case "${line:0:1}" in
+            -|d) ;;
+            *)
+              echo "::error::${archive_name} has a non-regular entry (symlink, hardlink, or device) '${line}'; refusing to extract"
+              exit 13
+              ;;
+          esac
+        done < "${kinds_list}"
+
         tar -xzf "${work_dir}/${archive_name}" -C "${stage}"
+
+        for member in bin/wp package-root; do
+          if [[ -L "${stage}/${member}" ]]; then
+            echo "::error::${archive_name} extracted ${member} as a symlink; refusing to install"
+            exit 14
+          fi
+        done
 
         if [[ "${cache_hit}" != "true" ]]; then
           if [[ ! -f "${stage}/bin/wp" ]]; then
