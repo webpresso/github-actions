@@ -77,7 +77,7 @@ describe("setup-wp binary install", () => {
     expect(dig(action, "inputs", "release-repo", "default")).toBe("webpresso/app-releases");
 
     const script = installScript();
-    expect(script).toInclude('https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}/${asset}');
+    expect(script).toInclude('base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"');
     expect(script).not.toInclude("api.github.com");
     expect(script, "the asset host redirects; curl must follow it").toInclude("curl -fsSL");
     expect(code(script), "the runner image must not need a python3 for this").not.toInclude("python3");
@@ -86,7 +86,7 @@ describe("setup-wp binary install", () => {
     // download that quietly depends on one is how the private-repo coupling
     // came back last time.
     const installEnv = Object.keys(asRecord(dig(steps[0], "env"), "runs.steps[0].env"));
-    expect(installEnv).toStrictEqual(["WP_VERSION", "WP_RELEASE_REPO", "WP_CHECKSUM"]);
+    expect(installEnv).toStrictEqual(["WP_VERSION", "WP_RELEASE_REPO", "WP_CHECKSUM", "WP_PACKAGE_ROOT"]);
   });
 
   it("never identifies an installed binary by `wp --version`", () => {
@@ -117,6 +117,7 @@ describe("setup-wp binary install", () => {
       // A repository that cannot resolve: any download attempt fails the step.
       WP_RELEASE_REPO: "webpresso/does-not-exist",
       WP_CHECKSUM: "",
+      WP_PACKAGE_ROOT: "false",
       RUNNER_TOOL_CACHE: cacheRoot,
     });
 
@@ -133,6 +134,7 @@ describe("setup-wp binary install", () => {
         WP_VERSION: version,
         WP_RELEASE_REPO: "webpresso/app-releases",
         WP_CHECKSUM: "",
+        WP_PACKAGE_ROOT: "false",
         RUNNER_TOOL_CACHE: makeTempDir("setup-wp-empty-cache-"),
       });
       expect(result.status, `expected '${version}' to be rejected`).toBe(2);
@@ -144,13 +146,15 @@ describe("setup-wp binary install", () => {
 describe("setup-wp package root", () => {
   it("is opt-in and off by default", () => {
     expect(dig(action, "inputs", "package-root", "default")).toBe("false");
-    expect(dig(steps[1], "if")).toBe("${{ inputs.package-root == 'true' }}");
+    expect(steps).toHaveLength(1);
+    expect(dig(steps[0], "env", "WP_PACKAGE_ROOT")).toBe("${{ inputs.package-root }}");
 
-    // The env exports belong to the opt-in step only; a default install must
-    // not point wp at a package root it never fetched.
+    // The package-root exports sit behind the opt-in flag; a default install
+    // must not point wp at a package root it never extracted.
     const install = installScript();
-    for (const name of ["WEBPRESSO_AGENT_KIT_ROOT", "WP_AGENT_KIT_PACKAGE_ROOT", "NODE_PATH"]) {
-      expect(install, `${name} must not be exported by the binary install`).not.toInclude(name);
+    expect(install.indexOf('"${WP_PACKAGE_ROOT}" != "true"')).toBeLessThan(install.indexOf("WEBPRESSO_PACKAGE_ROOT="));
+    for (const name of ["WEBPRESSO_AGENT_KIT_ROOT", "WP_AGENT_KIT_PACKAGE_ROOT"]) {
+      expect(install, `${name} is a retired env name`).not.toInclude(name);
     }
   });
 
@@ -158,12 +162,12 @@ describe("setup-wp package root", () => {
     // The caller-visible contract is the catalog, not "a tarball extracted".
     // wp setup/sync/audit resolve templates and blueprint migrations from it,
     // so a root without catalog/ is useless and must not pass silently.
-    const body = runBody(1);
+    const body = runBody(0);
     expect(body).toMatch(/catalog[\s\S]{0,200}exit \d/u);
   });
 
   it("reads the package root from the public release, with no token and no fallback", () => {
-    const body = runBody(1);
+    const body = runBody(0);
 
     // Same release as the binary: one source, one version axis.
     expect(body).toInclude("${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}");

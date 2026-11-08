@@ -1,0 +1,1 @@
+../../../../../../versions/0.0.16/package-root/catalog/agent/rules/model-effort-allocation.md
