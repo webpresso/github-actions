@@ -11,7 +11,7 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "7cc24562bdd020390449e004127ce33e015aea7dd0f97431b82337fe8ac213f4";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "9ee885db2620287a5e0a09f2360d744237bc0b8bbfb1fe9bc455d56e9f88051c";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
@@ -25,7 +25,9 @@ const steps = (() => {
   return value.map((step, index) => asRecord(step, `setup-wp runs.steps[${index}]`));
 })();
 const installScript = digString(steps[0], "run") ?? "";
-const packageRootScript = digString(steps[1], "run") ?? "";
+// The package-root phase of the single install step: everything from the
+// extraction of package-root/ onward.
+const packageRootScript = installScript.slice(installScript.indexOf('package_root="'));
 const wpSection = readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ?? "";
 
 function withoutDescriptions(value: unknown): unknown {
@@ -51,29 +53,24 @@ describe("setup-wp current information", () => {
   });
 
   it("M2 documents the complete action-supported assets and same-release package root", () => {
-    const binaryAssets = [...installScript.matchAll(/asset="(wp-(?:linux|darwin)-(?:x64|arm64))"/gu)]
+    const targets = [...installScript.matchAll(/target="((?:linux|darwin)-(?:x64|arm64))"/gu)]
       .map((match) => match[1])
-      .filter((asset): asset is string => asset !== undefined)
+      .filter((target): target is string => target !== undefined)
       .sort();
-    expect(binaryAssets).toStrictEqual([
-      "wp-darwin-arm64",
-      "wp-darwin-x64",
-      "wp-linux-arm64",
-      "wp-linux-x64",
-    ]);
-    const packageRootAsset = digString(steps[1], "env", "PACKAGE_ROOT_ASSET");
-    expect(packageRootAsset).toBe("wp-package-root.tgz");
+    expect(targets).toStrictEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
 
-    for (const asset of [...binaryAssets, packageRootAsset]) {
-      expect(wpSection).toInclude(asset ?? "missing package-root asset");
+    for (const target of targets) {
+      expect(wpSection).toInclude(`wp-${target}.tar.gz`);
     }
+    expect(wpSection).toInclude(".tar.gz.json");
+    expect(wpSection).toInclude("package-root/");
     expect(wpSection).toMatch(/same release.*same version/iu);
     expect(wpSection).not.toMatch(/source[- ]archive|\/tarball\/|private source monorepo|package-root-ref|token fallback/iu);
   });
 
   it("M3 documents cache-hit, download-miss, checksum, and best-effort seed ordering", () => {
     expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(installScript.indexOf("curl -fsSL"));
-    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf("WP_CHECKSUM"));
+    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf('sha256_of "${install_dir}/wp"'));
     expect(installScript).toInclude("Best effort");
 
     expect(wpSection).toMatch(/cache hit.*skips? (?:both )?(?:the )?download.*checksum/isu);
@@ -84,8 +81,7 @@ describe("setup-wp current information", () => {
   });
 
   it("M4 documents current exports and fail-closed catalog behavior", () => {
-    const exports = [...packageRootScript.matchAll(/echo "([A-Z_]+)=/gu)]
-      .map((match) => match[1])
+    const exports = [...packageRootScript.matchAll(/echo "([A-Z_]+)=/gu)]      .map((match) => match[1])
       .filter((name): name is string => name !== undefined);
     expect(exports).toStrictEqual(["WEBPRESSO_PACKAGE_ROOT", "NODE_PATH"]);
     expect(packageRootScript).toMatch(/catalog[\s\S]{0,200}exit 12/u);
