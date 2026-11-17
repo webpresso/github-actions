@@ -63,7 +63,8 @@ export const JOB_TIMEOUT_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
  * the suite still proves every site agrees.
  */
 export const WAIT_FOR_CHECKS_USES_RE = /\/wait-for-checks@/u;
-export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/actions/wait-for-checks@";
+export const REMOTE_WAIT_FOR_CHECKS_PREFIX =
+  "webpresso/github-actions/.github/actions/wait-for-checks@";
 
 /**
  * self-test.yml is this repository's own CI gate: it runs the contract suite
@@ -130,7 +131,10 @@ export function dig(node: YamlNode | undefined, ...keys: readonly string[]): Yam
   return current;
 }
 
-export function digString(node: YamlNode | undefined, ...keys: readonly string[]): string | undefined {
+export function digString(
+  node: YamlNode | undefined,
+  ...keys: readonly string[]
+): string | undefined {
   const value = dig(node, ...keys);
   return typeof value === "string" ? value : undefined;
 }
@@ -180,7 +184,9 @@ export function allStepsAnywhere(node: YamlNode | undefined): readonly YamlRecor
 }
 
 export function extractUses(steps: readonly YamlRecord[]): readonly string[] {
-  return steps.map((step) => step["uses"]).filter((value): value is string => typeof value === "string");
+  return steps
+    .map((step) => step["uses"])
+    .filter((value): value is string => typeof value === "string");
 }
 
 /** Every `uses:` value anywhere in a workflow or composite action document. */
@@ -242,7 +248,9 @@ export const CANONICAL_PIN_WORKFLOW = WORKFLOW_PRODUCTION;
 function soleMatch(values: readonly string[], pattern: RegExp, label: string): string {
   const unique = [...new Set(values.filter((value) => pattern.test(value)))];
   if (unique.length !== 1) {
-    throw new Error(`expected exactly one distinct ${label} in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`);
+    throw new Error(
+      `expected exactly one distinct ${label} in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`,
+    );
   }
   return unique[0] as string;
 }
@@ -251,7 +259,11 @@ const canonicalWorkflow = loadYaml(CANONICAL_PIN_WORKFLOW);
 const canonicalUses = allUses(canonicalWorkflow);
 
 /** `webpresso/github-actions/.github/actions/setup-webpresso-toolchain@<sha>` */
-export const SETUP_TOOLCHAIN_USES: string = soleMatch(canonicalUses, TOOLCHAIN_USES_RE, "toolchain pin");
+export const SETUP_TOOLCHAIN_USES: string = soleMatch(
+  canonicalUses,
+  TOOLCHAIN_USES_RE,
+  "toolchain pin",
+);
 
 /** `webpresso/github-actions/.github/actions/setup-wp@<sha>` */
 export const SETUP_WP_USES: string = soleMatch(canonicalUses, SETUP_WP_USES_RE, "setup-wp pin");
@@ -264,7 +276,9 @@ export const SETUP_WP_VERSION: string = (() => {
     .filter((value): value is string => typeof value === "string");
   const unique = [...new Set(versions)];
   if (unique.length !== 1) {
-    throw new Error(`expected exactly one distinct setup-wp version in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`);
+    throw new Error(
+      `expected exactly one distinct setup-wp version in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`,
+    );
   }
   return unique[0] as string;
 })();

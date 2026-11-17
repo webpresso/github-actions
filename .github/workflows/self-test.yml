@@ -6,7 +6,8 @@ name: Self-test
 # contract could merge unnoticed. This is the gate that makes them binding.
 #
 # One toolchain, one command. The suite runs under `bun test` with zero npm
-# dependencies and no package.json (`Bun.YAML` is built in). `node` is still
+# dependencies (`Bun.YAML` is built in; the root package.json is only a
+# private workspace marker for `wp format`). `node` is still
 # used inside the tests to execute the workflows' embedded scripts -- that is
 # what the Actions runner does -- and ships preinstalled on ubuntu-latest.
 
@@ -147,3 +148,41 @@ jobs:
           fi
 
           echo "bounded wait failed in ${elapsed}s and reported: ${STATES}"
+
+  # The sign-in step's branches are proven against a stub wp in the contract
+  # suite. This job proves the one branch a stub cannot: the in-repo action
+  # installs a REAL published pre-login release with auth auto and no
+  # id-token (this workflow never grants one), and leaves the job signed out
+  # and otherwise unchanged -- the path every caller below the login-only
+  # floor takes. Move the version to the login-only release before the
+  # pre-login releases are deleted.
+  setup-wp-live-skip:
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-wp
+        with:
+          version: 0.0.21
+          auth: auto
+
+      - name: Assert wp is installed and sign-in was skipped
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved="$(command -v wp)"
+          if [[ "${resolved}" != "${WP_INSTALL_DIR}/wp" ]]; then
+            echo "::error::expected wp at ${WP_INSTALL_DIR}/wp on PATH, got '${resolved}'"
+            exit 1
+          fi
+          if [[ -n "${WEBPRESSO_HOME:-}" ]]; then
+            echo "::error::sign-in must be skipped below the login-only floor, but WEBPRESSO_HOME is '${WEBPRESSO_HOME}'"
+            exit 1
+          fi
+          echo "setup-wp installed ${resolved} and skipped sign-in"

@@ -3,6 +3,7 @@
 Public reusable GitHub Actions workflows for Webpresso consumer repositories.
 
 Current workflows:
+
 - `.github/workflows/webpresso-security.yml`
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
@@ -30,9 +31,11 @@ real git fixtures).
 bun test
 ```
 
-That is the whole thing: no `package.json`, no dependency install, no other
-runtime to provision. The suite lives in `test/*.test.ts` and shares
-`test/helpers.ts`. `node` is used *inside* the tests to execute the workflows'
+That is the whole thing: no dependency install and no other runtime to
+provision. The root `package.json` declares only a name and `private: true`;
+it carries no scripts or dependencies and exists because `wp format` needs a
+workspace root. The suite lives in `test/*.test.ts` and shares
+`test/helpers.ts`. `node` is used _inside_ the tests to execute the workflows'
 embedded scripts, matching what the GitHub Actions runner does; it is
 preinstalled on GitHub-hosted runners and on any normal dev machine.
 
@@ -40,21 +43,35 @@ preinstalled on GitHub-hosted runners and on any normal dev machine.
 every push to `main`, so a broken contract cannot merge green.
 
 Shared toolchain action (`setup-webpresso-toolchain`):
+
 - installs the caller's pnpm (from `package.json#packageManager`, read by `pnpm/action-setup`) and configures Node.js, Vite+, and (optionally) Bun
 - installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
 wp install contract (`setup-wp`):
+
 - every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
 - `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
 - `wp` comes from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
 - one install archive per target: supported assets are exactly `wp-linux-x64.tar.gz`, `wp-linux-arm64.tar.gz`, `wp-darwin-x64.tar.gz`, and `wp-darwin-arm64.tar.gz`, each with a digest sidecar (`wp-<target>.tar.gz.json`); the archive sha256 is verified against the sidecar (`archive`, `version`, `target` must also match) and the action fails with a named error on any mismatch; the archive is listed and refused (before anything is extracted) if any entry is not a regular file or directory, is an absolute path, or contains `..`; `bin/wp` is extracted from the archive
 - the sidecar digest is **not** an independent trust root: the archive and its sidecar come from the same release location, so it protects against corruption and partial downloads, not against a compromised release repository or a mirror set through `release-repo`; high-assurance consumers should pin the `checksum` input, which verifies the extracted `bin/wp` and does not cover `package-root/`
-- a version-directory tool-cache hit skips the download and trusts the cached `wp` unless `checksum` is set, in which case the cached binary is verified against it (named error on mismatch); with `package-root: true` the archive is still downloaded, verified and extracted on a hit, so `package-root/` comes from the verified archive while `wp` comes from the cache; a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification of the extracted `bin/wp` (not of the archive), then attempts a best-effort seed of that same cache path
+- a version-directory tool-cache hit is verified before it is used: against `checksum` when set, else against the `wp.sha256` digest record that `setup-wp` writes next to a binary it verified from a release archive (exit 16 on a mismatch); a cached `wp` with neither is treated as a cache miss and downloaded again. Only a verified cache hit skips the download. Anything able to write the tool cache can rewrite both files, so the `checksum` input stays the only independent trust root; the record catches corruption and binaries of unknown provenance. With `package-root: true` the archive is still downloaded, verified and extracted on a hit, so `package-root/` comes from the verified archive while `wp` comes from the cache
+- a cache miss uses the direct release-asset URL, applies optional caller-supplied sha256 verification of the extracted `bin/wp` (not of the archive), then attempts a best-effort seed of that same cache path: the binary first, then its `wp.sha256` record
 - the cache is keyed on the version directory, never on `wp --version`; a standalone binary cannot reliably identify its release version
 - `wp` is placed on `PATH` after Vite+ setup, so consumers must not add `@webpresso/agent-kit` as a repository dependency
 - `package-root: true` additionally extracts `package-root/` from the same archive, so the same release and same version as the binary with no second download; it exports `WEBPRESSO_PACKAGE_ROOT` and `NODE_PATH`, and fails closed when the extracted root lacks `catalog/`
 - consumers update the reusable-workflow commit SHA and pinned product version independently
+
+Sign-in for login-only wp (`setup-wp` inputs `auth` and `entitlement`):
+
+- wp is login-only from `0.0.23`: signed out, its non-exempt commands exit 77. After the install, a second step signs wp in for the job. Input `auth` selects the mode: `auto` (the default) signs in at or above `0.0.23` and is a no-op below it; `oidc` requires a login-only version (exit 20 otherwise); `none` never signs in and warns for a login-only version. The floor is compared on the numeric major.minor.patch core, so a `0.0.23` prerelease is login-only
+- callers on older versions run unchanged by the sign-in step, but this revision installs only releases that publish install archives, which means `0.0.16` or later. `0.0.6`, `0.0.9`, `0.0.10` and `0.0.13` publish flat binaries and fail with exit 6, so a caller on one of them moves its version together with its pin (this boundary came with the archive contract, before sign-in)
+- the default sign-in runs `wp auth ci`, which requests the job's GitHub OIDC token (audience `https://api.webpresso.ai`), masks it, and exchanges it for a short-lived CI entitlement (at most 6 hours). No stored secret is involved, but the calling job must grant `permissions: id-token: write`; job-level permissions replace the defaults, so list the others too. When sign-in is required and the job has no id-token, the step fails with exit 17 before any network call and names that permission
+- pull requests from forks never receive an id-token, so a login-only wp cannot sign in there. Treat Dependabot pull requests the same way (whether their runs receive an id-token is not verified here): skip wp-dependent jobs for them, for example with `if: github.actor != 'dependabot[bot]'`, or accept the failing check
+- wp keeps the CI entitlement in its own Actions auth directory, `${RUNNER_TEMP}/webpresso/auth` (`entitlement.jwt`), whenever `GITHUB_ACTIONS` is `true`, whatever `WEBPRESSO_HOME` says. The runner empties `RUNNER_TEMP` after every job, so the entitlement never reaches `$HOME`, a cache or an artifact, and later steps find it without an exported variable; `setup-wp` neither sets nor exports `WEBPRESSO_HOME`. Before running wp the step refuses with exit 21 when `RUNNER_TEMP` is missing, when `webpresso` or `webpresso/auth` under it exists as anything but a real directory, or when `entitlement.jwt` exists as a symlink or another non-regular file, so a planted link cannot carry the write out of `RUNNER_TEMP`
+- `entitlement` is break-glass only, for when api.webpresso.ai cannot exchange. Pass it from `secrets.*`: the step registers it with `::add-mask::` before its own output, but the runner prints a composite step's env before the step runs, so only a registered secret is masked from the start. It is piped to `wp auth import --stdin` (never argv, never `GITHUB_ENV`), takes precedence over OIDC, and a break-glass sign-in ends with a warning naming kind `breakglass` and the expiry, so a left-over secret shows on every run. With a version below the floor and `auth: auto` it is ignored with a warning, so a caller that forwards the secret before moving to a login-only wp keeps working; with `auth: none`, or with `auth: oidc` below the floor, it fails with exit 20, as does an unknown `auth` value
+- the step calls the installed binary by path and holds the output of `wp auth ci` or `wp auth import --stdin` in a private file under `RUNNER_TEMP` until the entitlement wp wrote is masked; only then is that output printed. A failing `wp auth ci` or `wp auth import --stdin` fails the step with exit 18. If wp reports success but `${RUNNER_TEMP}/webpresso/auth/entitlement.jwt` is not a regular file inside `RUNNER_TEMP`, wp and `setup-wp` disagree on the contract: the step withholds wp's output and fails with exit 19. Afterwards `wp auth status --json` must report `signed-in` with kind `ci` or `breakglass`, or the step fails with exit 19
+- `permissions: id-token: write` covers the whole job: every later step, including a caller's install command, can mint an OIDC token for any audience and read the entitlement. The entitlement grants Webpresso CLI use only, never provider or runtime secrets; keep `id-token: write` off jobs that do not run wp
 
 ## Gating on test outcomes (`wait-for-checks`)
 
@@ -144,7 +161,7 @@ Three things about this surface are load-bearing:
   A required input would have broken every pinned consumer on their next pin
   bump.
 - **The composite is referenced by its remote pinned SHA, never `./…`.** Inside
-  a reusable workflow a relative `uses:` resolves against the *caller's*
+  a reusable workflow a relative `uses:` resolves against the _caller's_
   checkout, which does not exist at step 0. The pin must also stay **reachable
   from a branch**: Actions refuses to resolve a `uses:` pin to an unreachable
   commit — the classic source being a squash-merged PR branch that was then
@@ -153,12 +170,13 @@ Three things about this surface are load-bearing:
   request so that failure surfaces here rather than in a consumer's deploy.
 - **`job_timeout_minutes` exists because callers cannot bound a `uses:` job.**
   `timeout-minutes` is not permitted on a job that calls a reusable workflow, so
-  the bound has to be exposed from inside. This *adds a missing* bound rather
+  the bound has to be exposed from inside. This _adds a missing_ bound rather
   than raising one: `cloudflare-production.yml` and `changesets-release.yml`
   previously had none, so a hung run held the caller's concurrency lock until
   GitHub's 6h default.
 
 Security contract:
+
 - reusable deployment workflows use repo-owned secret profiles and require a
   `secret_profile` input plus a
   run-capable `secret_sink`; only deploy, destroy, and rollback execute through

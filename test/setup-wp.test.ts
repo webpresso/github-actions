@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACTION_SETUP_WP, asRecord, dig, loadYaml, makeTempDir } from "./helpers.ts";
@@ -41,7 +42,12 @@ function runScript(body: string, env: Readonly<Record<string, string>>) {
       ...env,
     },
   });
-  return { dir, result, githubPath: readFileSync(githubPath, "utf8"), githubEnv: readFileSync(githubEnv, "utf8") };
+  return {
+    dir,
+    result,
+    githubPath: readFileSync(githubPath, "utf8"),
+    githubEnv: readFileSync(githubEnv, "utf8"),
+  };
 }
 
 function runBody(index: number): string {
@@ -77,23 +83,34 @@ describe("setup-wp binary install", () => {
     expect(dig(action, "inputs", "release-repo", "default")).toBe("webpresso/app-releases");
 
     const script = installScript();
-    expect(script).toInclude('base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"');
+    expect(script).toInclude(
+      'base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"',
+    );
     expect(script).not.toInclude("api.github.com");
     expect(script, "the asset host redirects; curl must follow it").toInclude("curl -fsSL");
-    expect(code(script), "the runner image must not need a python3 for this").not.toInclude("python3");
+    expect(code(script), "the runner image must not need a python3 for this").not.toInclude(
+      "python3",
+    );
 
     // The install step must not be able to see a token at all: a public
     // download that quietly depends on one is how the private-repo coupling
     // came back last time.
     const installEnv = Object.keys(asRecord(dig(steps[0], "env"), "runs.steps[0].env"));
-    expect(installEnv).toStrictEqual(["WP_VERSION", "WP_RELEASE_REPO", "WP_CHECKSUM", "WP_PACKAGE_ROOT"]);
+    expect(installEnv).toStrictEqual([
+      "WP_VERSION",
+      "WP_RELEASE_REPO",
+      "WP_CHECKSUM",
+      "WP_PACKAGE_ROOT",
+    ]);
   });
 
   it("never identifies an installed binary by `wp --version`", () => {
     // Every published standalone binary prints 0.0.0 (it reports the product
     // axis from a package root it does not carry), so any equality assertion
     // against the pinned version is guaranteed to fail.
-    for (const body of steps.map((step) => step["run"]).filter((body): body is string => typeof body === "string")) {
+    for (const body of steps
+      .map((step) => step["run"])
+      .filter((body): body is string => typeof body === "string")) {
       expect(code(body)).not.toMatch(/wp\s+--version/u);
     }
   });
@@ -101,7 +118,9 @@ describe("setup-wp binary install", () => {
   it("short-circuits on the tool cache before touching the network", () => {
     const script = installScript();
     expect(script.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(script.indexOf("curl -fsSL"));
-    expect(script).toInclude('cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"');
+    expect(script).toInclude(
+      'cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"',
+    );
   });
 
   it("puts a cached wp on PATH without downloading anything", () => {
@@ -109,8 +128,15 @@ describe("setup-wp binary install", () => {
     const versionDir = join(cacheRoot, "wp", "9.9.9", TOOL_ARCH);
     mkdirSync(versionDir, { recursive: true });
     const cachedBinary = join(versionDir, "wp");
-    writeFileSync(cachedBinary, "#!/bin/sh\nexit 0\n");
+    const cachedBody = "#!/bin/sh\nexit 0\n";
+    writeFileSync(cachedBinary, cachedBody);
     chmodSync(cachedBinary, 0o755);
+    // The digest record setup-wp seeds next to a binary it verified; a hit
+    // without one (or a checksum input) is treated as a miss.
+    writeFileSync(
+      join(versionDir, "wp.sha256"),
+      `${createHash("sha256").update(cachedBody).digest("hex")}\n`,
+    );
 
     const { result, githubPath, githubEnv } = runScript(installScript(), {
       WP_VERSION: "9.9.9",
@@ -146,13 +172,17 @@ describe("setup-wp binary install", () => {
 describe("setup-wp package root", () => {
   it("is opt-in and off by default", () => {
     expect(dig(action, "inputs", "package-root", "default")).toBe("false");
-    expect(steps).toHaveLength(1);
+    // Install, then sign-in (test/setup-wp-auth.test.ts); the package root is
+    // part of the install step.
+    expect(steps).toHaveLength(2);
     expect(dig(steps[0], "env", "WP_PACKAGE_ROOT")).toBe("${{ inputs.package-root }}");
 
     // The package-root exports sit behind the opt-in flag; a default install
     // must not point wp at a package root it never extracted.
     const install = installScript();
-    expect(install.indexOf('"${WP_PACKAGE_ROOT}" != "true"')).toBeLessThan(install.indexOf("WEBPRESSO_PACKAGE_ROOT="));
+    expect(install.indexOf('"${WP_PACKAGE_ROOT}" != "true"')).toBeLessThan(
+      install.indexOf("WEBPRESSO_PACKAGE_ROOT="),
+    );
     for (const name of ["WEBPRESSO_AGENT_KIT_ROOT", "WP_AGENT_KIT_PACKAGE_ROOT"]) {
       expect(install, `${name} is a retired env name`).not.toInclude(name);
     }
