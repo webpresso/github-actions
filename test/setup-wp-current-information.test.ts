@@ -172,6 +172,19 @@ describe("setup-wp current information", () => {
     }
     expect(wpSection).toMatch(/fork/iu);
     expect(wpSection).toMatch(/older .*unchanged|unchanged .*older|below .*no-op/isu);
+
+    // The CI auth directory is wp's own (app lane login-only-apps D7), held as
+    // one constant; setup-wp no longer chooses or exports a WEBPRESSO_HOME.
+    const authDir = /auth_dir="\$\{RUNNER_TEMP\}\/([a-z/]+)"/u.exec(signInScript)?.[1];
+    expect(authDir).toBe("webpresso/auth");
+    expect(wpSection).toInclude(`\`\${RUNNER_TEMP}/${authDir}\``);
+    expect(wpSection).not.toInclude("webpresso-home");
+    expect(digString(inputs["auth"], "description") ?? "").not.toInclude("WEBPRESSO_HOME");
+    // Honest compatibility, masking and actor boundaries.
+    expect(wpSection).toInclude("`0.0.16`");
+    expect(wpSection).toMatch(/dependabot/iu);
+    expect(wpSection).toInclude("`secrets.*`");
+    expect(wpSection).not.toMatch(/only the kind and the expiry are printed/iu);
   });
 
   it("action behavior boundary", () => {
