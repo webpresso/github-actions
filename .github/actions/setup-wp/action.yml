@@ -9,7 +9,9 @@ description: >
   root (both files come from the same release location): it guards against
   corruption and partial downloads, not a compromised release repository or a
   mirror set through release-repo. High-assurance consumers should pin the
-  checksum input.
+  checksum input. For a login-only wp (see the auth input) a second step then
+  signs wp in with the job's GitHub OIDC token, keeping the CI entitlement
+  under RUNNER_TEMP.
 
 inputs:
   version:
@@ -31,7 +33,32 @@ inputs:
       not cover package-root/). When set, the
       binary is verified against it and the action fails on a mismatch. On a
       tool-cache hit the cached wp is verified against it instead (exit 16 on
-      a mismatch); without it a cached wp is trusted as provisioned.
+      a mismatch); without it a cached wp is verified against the wp.sha256
+      record this action seeds next to it, and a cached wp with neither is
+      treated as a miss and downloaded.
+    required: false
+    default: ""
+  auth:
+    description: >
+      Sign wp in after the install. auto (default) signs in when version is
+      at or above 0.0.23, the first login-only wp, and does nothing for an
+      older version; oidc requires a login-only version and signs in; none
+      never signs in and warns for a login-only version, whose non-exempt
+      commands then exit 77. Sign-in runs `wp auth ci`, which exchanges the
+      job's GitHub OIDC token, so the calling job needs
+      `permissions: id-token: write` (pull requests from forks receive no
+      id-token). The entitlement lives under RUNNER_TEMP and WEBPRESSO_HOME
+      is exported for later steps.
+    required: false
+    default: auto
+  entitlement:
+    description: >
+      Break-glass only: a Webpresso entitlement to import instead of the OIDC
+      exchange, for when api.webpresso.ai cannot exchange. Pass it from a
+      secret. It is masked before any output, piped to
+      `wp auth import --stdin` (never argv or GITHUB_ENV) and takes
+      precedence over OIDC. Requires a login-only version and auth auto or
+      oidc (exit 20 otherwise).
     required: false
     default: ""
   package-root:
@@ -97,23 +124,38 @@ runs:
         # standalone binary does not have, so every release binary prints
         # 0.0.0 and can never identify itself. The directory name is the only
         # honest provenance signal, and it is what the runner image writes.
+        #
+        # A hit is never trusted unverified. The expected digest is the
+        # caller's checksum, else the wp.sha256 record this action writes
+        # next to a binary it verified from a release archive; a cached wp
+        # with neither is treated as a miss and downloaded again. Anything
+        # that can write the tool cache can rewrite both files, so only the
+        # checksum input is an independent trust root: the record catches
+        # corruption and binaries of unknown provenance, not a hostile cache.
         cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"
+        cache_record="${cache_root}/wp.sha256"
         cache_hit=false
         if [[ -x "${cache_root}/wp" ]]; then
-          cache_hit=true
-          echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
-          if [[ -n "${WP_CHECKSUM}" ]]; then
+          cached_expected="${WP_CHECKSUM}"
+          if [[ -z "${cached_expected}" && -f "${cache_record}" ]]; then
+            read -r cached_expected _ < "${cache_record}" || true
+          fi
+          if [[ -z "${cached_expected}" ]]; then
+            echo "setup-wp: cached wp at ${cache_root} has no checksum and no digest record; treating it as a cache miss"
+          else
             cached_actual="$(sha256_of "${cache_root}/wp")"
-            if [[ "${cached_actual}" != "${WP_CHECKSUM}" ]]; then
-              echo "::error::sha256 mismatch for cached wp ${cache_root}/wp: expected ${WP_CHECKSUM}, got ${cached_actual}"
+            if [[ "${cached_actual}" != "${cached_expected}" ]]; then
+              echo "::error::sha256 mismatch for cached wp ${cache_root}/wp: expected ${cached_expected}, got ${cached_actual}"
               exit 16
             fi
+            cache_hit=true
+            echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
             echo "setup-wp: cached wp sha256 verified"
-          fi
-          echo "${cache_root}" >> "${GITHUB_PATH}"
-          echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
-          if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
-            exit 0
+            echo "${cache_root}" >> "${GITHUB_PATH}"
+            echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
+            if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
+              exit 0
+            fi
           fi
         fi
 
@@ -255,12 +297,21 @@ runs:
           # consumer probing the same path) short-circuits. Best effort: the
           # cache root is root-owned on some images, and failing to seed it is
           # not a reason to fail an otherwise successful install.
+          #
+          # The digest record is removed first and written only after the
+          # binary it describes is in place, so an interrupted seed leaves no
+          # record (a later miss) and never a record for a different binary.
+          installed_sha="$(sha256_of "${install_dir}/wp")"
           if mkdir -p "${cache_root}" 2>/dev/null &&
+             rm -f "${cache_record}" 2>/dev/null &&
              cp "${install_dir}/wp" "${cache_root}/wp.tmp" 2>/dev/null &&
              mv "${cache_root}/wp.tmp" "${cache_root}/wp" 2>/dev/null; then
             chmod +x "${cache_root}/wp" || true
-            touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
-            echo "setup-wp: seeded tool cache at ${cache_root}"
+            if printf '%s\n' "${installed_sha}" 2>/dev/null > "${cache_root}/wp.sha256.tmp" &&
+               mv "${cache_root}/wp.sha256.tmp" "${cache_root}/wp.sha256" 2>/dev/null; then
+              touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
+              echo "setup-wp: seeded tool cache at ${cache_root}"
+            fi
           fi
 
           echo "${install_dir}" >> "${GITHUB_PATH}"
@@ -327,3 +378,189 @@ runs:
           echo "NODE_PATH=${modules_root}${NODE_PATH:+:${NODE_PATH}}"
         } >> "${GITHUB_ENV}"
         echo "package root: ${WP_RELEASE_REPO} v${WP_VERSION} (public, tokenless)"
+
+    - name: Sign wp in for this job
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.version }}
+        WP_AUTH: ${{ inputs.auth }}
+        WP_ENTITLEMENT: ${{ inputs.entitlement }}
+      run: |
+        set -euo pipefail
+
+        # Mask a break-glass entitlement before this step can print anything.
+        if [[ -n "${WP_ENTITLEMENT}" ]]; then
+          while IFS= read -r mask_line || [[ -n "${mask_line}" ]]; do
+            if [[ -n "${mask_line}" ]]; then
+              echo "::add-mask::${mask_line}"
+            fi
+          done <<< "${WP_ENTITLEMENT}"
+        fi
+
+        # The first login-only wp release. Older releases have no sign-in and
+        # must keep working unchanged, so this step is a no-op for them.
+        login_floor="0.0.23"
+
+        case "${WP_AUTH}" in
+          auto|oidc|none) ;;
+          *)
+            echo "::error::setup-wp 'auth' must be auto, oidc or none, got '${WP_AUTH}'"
+            exit 20
+            ;;
+        esac
+
+        if [[ ! "${WP_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::setup-wp 'version' must be exact semver, got '${WP_VERSION}'"
+          exit 20
+        fi
+
+        # Compare the numeric major.minor.patch core only, so a prerelease of
+        # the floor release already counts as login-only.
+        at_or_above_floor() {
+          local -a have want
+          local i
+          IFS=. read -r -a have <<< "${WP_VERSION%%[+-]*}"
+          IFS=. read -r -a want <<< "${login_floor}"
+          for i in 0 1 2; do
+            if (( 10#${have[i]} > 10#${want[i]} )); then return 0; fi
+            if (( 10#${have[i]} < 10#${want[i]} )); then return 1; fi
+          done
+          return 0
+        }
+        login_only=false
+        if at_or_above_floor; then
+          login_only=true
+        fi
+
+        if [[ -n "${WP_ENTITLEMENT}" ]]; then
+          if [[ "${WP_AUTH}" == "none" ]]; then
+            echo "::error::setup-wp 'entitlement' is set but 'auth' is none; remove the entitlement or use auth auto"
+            exit 20
+          fi
+          if [[ "${login_only}" != "true" ]]; then
+            echo "::error::setup-wp 'entitlement' is set but wp ${WP_VERSION} predates sign-in (login-only from ${login_floor})"
+            exit 20
+          fi
+        fi
+
+        if [[ "${WP_AUTH}" == "none" ]]; then
+          if [[ "${login_only}" == "true" ]]; then
+            echo "::warning::wp ${WP_VERSION} is login-only and setup-wp 'auth' is none: wp stays signed out and its non-exempt commands exit 77"
+          fi
+          exit 0
+        fi
+
+        if [[ "${login_only}" != "true" ]]; then
+          if [[ "${WP_AUTH}" == "oidc" ]]; then
+            echo "::error::setup-wp 'auth: oidc' needs a login-only wp (${login_floor} or later), got '${WP_VERSION}'"
+            exit 20
+          fi
+          echo "setup-wp: wp ${WP_VERSION} predates sign-in (login-only from ${login_floor}); nothing to sign in"
+          exit 0
+        fi
+
+        if [[ -z "${WP_ENTITLEMENT}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          echo "::error::wp ${WP_VERSION} is login-only and this job has no GitHub OIDC token to sign in with. Add 'permissions: id-token: write' to the job that runs setup-wp (job-level permissions replace the defaults, so list the others too). Pull requests from forks never receive an id-token."
+          exit 17
+        fi
+
+        # The entitlement must not outlive the job: it lives under RUNNER_TEMP,
+        # which the runner empties after every job, never under $HOME, a
+        # cache, an artifact or a persistent runner's disk. A caller-set
+        # WEBPRESSO_HOME is accepted only when its physical path (symlinks
+        # resolved) is inside RUNNER_TEMP, checked before anything is created.
+        refuse_home() {
+          echo "::error::WEBPRESSO_HOME '${1}' must be a directory inside RUNNER_TEMP so the CI entitlement is deleted with the job; ${2}"
+          exit 21
+        }
+        if [[ -z "${RUNNER_TEMP:-}" || ! -d "${RUNNER_TEMP}" ]]; then
+          refuse_home "${WEBPRESSO_HOME:-}" "RUNNER_TEMP is not set"
+        fi
+        temp_real="$(cd -P -- "${RUNNER_TEMP}" && pwd -P)"
+        home="${WEBPRESSO_HOME:-${RUNNER_TEMP}/webpresso-home}"
+        while [[ "${home}" == */ && "${home}" != "/" ]]; do
+          home="${home%/}"
+        done
+        case "${home}" in
+          /*) ;;
+          *) refuse_home "${home}" "it is not an absolute path" ;;
+        esac
+        case "${home}" in
+          *$'\n'*) refuse_home "${home}" "it contains a newline" ;;
+        esac
+        case "/${home}/" in
+          */../*|*/./*) refuse_home "${home}" "it contains a dot segment" ;;
+        esac
+        probe="${home}"
+        rest=""
+        while [[ ! -d "${probe}" ]]; do
+          if [[ -e "${probe}" || -L "${probe}" ]]; then
+            refuse_home "${home}" "'${probe}' exists and is not a directory"
+          fi
+          rest="/${probe##*/}${rest}"
+          probe="${probe%/*}"
+          probe="${probe:-/}"
+        done
+        home_real="$(cd -P -- "${probe}" && pwd -P)${rest}"
+        if [[ "${home_real}" != "${temp_real}"/?* ]]; then
+          refuse_home "${home}" "it resolves to '${home_real}'"
+        fi
+
+        # The installed binary by path, never by PATH lookup.
+        wp_bin="${WP_INSTALL_DIR:-}/wp"
+        if [[ -z "${WP_INSTALL_DIR:-}" || ! -x "${wp_bin}" ]]; then
+          echo "::error::setup-wp found no installed wp at '${wp_bin}' to sign in"
+          exit 18
+        fi
+
+        mkdir -p "${home}"
+        chmod 700 "${home}"
+        export WEBPRESSO_HOME="${home}"
+
+        # wp owns the auth contract: the OIDC audience, the exchange endpoint
+        # and offline verification. This step never requests a token, parses
+        # claims or writes the entitlement itself.
+        if [[ -n "${WP_ENTITLEMENT}" ]]; then
+          echo "setup-wp: importing the break-glass entitlement"
+          if ! printf '%s' "${WP_ENTITLEMENT}" | "${wp_bin}" auth import --stdin; then
+            echo "::error::wp auth import --stdin refused the break-glass entitlement"
+            exit 18
+          fi
+        else
+          echo "setup-wp: signing wp in with this job's GitHub OIDC token"
+          if ! "${wp_bin}" auth ci; then
+            echo "::error::wp auth ci could not exchange this job's GitHub OIDC token for a Webpresso CI entitlement"
+            exit 18
+          fi
+        fi
+
+        # Mask what wp wrote before anything else can print it.
+        entitlement_file="${home}/auth/entitlement.jwt"
+        if [[ -f "${entitlement_file}" ]]; then
+          while IFS= read -r mask_line || [[ -n "${mask_line}" ]]; do
+            if [[ -n "${mask_line}" && "${mask_line}" != "${WP_ENTITLEMENT}" ]]; then
+              echo "::add-mask::${mask_line}"
+            fi
+          done < "${entitlement_file}"
+        fi
+
+        if ! status_json="$("${wp_bin}" auth status --json)"; then
+          echo "::error::wp auth status --json failed after sign-in"
+          exit 19
+        fi
+        status_field() {
+          local pattern="\"${1}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\""
+          if [[ "${status_json}" =~ ${pattern} ]]; then
+            printf '%s' "${BASH_REMATCH[1]}"
+          fi
+        }
+        state="$(status_field state)"
+        kind="$(status_field kind)"
+        expires="$(status_field expiresAt)"
+        if [[ "${state}" != "signed-in" || ( "${kind}" != "ci" && "${kind}" != "breakglass" ) ]]; then
+          echo "::error::wp auth status reports state '${state:-unknown}' with kind '${kind:-unknown}' after sign-in; expected signed-in with kind ci or breakglass"
+          exit 19
+        fi
+
+        echo "WEBPRESSO_HOME=${home}" >> "${GITHUB_ENV}"
+        echo "setup-wp: wp signed in (kind ${kind}, expires ${expires:-unknown})"
