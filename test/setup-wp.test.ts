@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACTION_SETUP_WP, asRecord, dig, loadYaml, makeTempDir } from "./helpers.ts";
@@ -109,8 +110,12 @@ describe("setup-wp binary install", () => {
     const versionDir = join(cacheRoot, "wp", "9.9.9", TOOL_ARCH);
     mkdirSync(versionDir, { recursive: true });
     const cachedBinary = join(versionDir, "wp");
-    writeFileSync(cachedBinary, "#!/bin/sh\nexit 0\n");
+    const cachedBody = "#!/bin/sh\nexit 0\n";
+    writeFileSync(cachedBinary, cachedBody);
     chmodSync(cachedBinary, 0o755);
+    // The digest record setup-wp seeds next to a binary it verified; a hit
+    // without one (or a checksum input) is treated as a miss.
+    writeFileSync(join(versionDir, "wp.sha256"), `${createHash("sha256").update(cachedBody).digest("hex")}\n`);
 
     const { result, githubPath, githubEnv } = runScript(installScript(), {
       WP_VERSION: "9.9.9",
@@ -146,7 +151,9 @@ describe("setup-wp binary install", () => {
 describe("setup-wp package root", () => {
   it("is opt-in and off by default", () => {
     expect(dig(action, "inputs", "package-root", "default")).toBe("false");
-    expect(steps).toHaveLength(1);
+    // Install, then sign-in (test/setup-wp-auth.test.ts); the package root is
+    // part of the install step.
+    expect(steps).toHaveLength(2);
     expect(dig(steps[0], "env", "WP_PACKAGE_ROOT")).toBe("${{ inputs.package-root }}");
 
     // The package-root exports sit behind the opt-in flag; a default install

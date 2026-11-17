@@ -226,6 +226,8 @@ type RunOptions = FixtureOptions & {
   readonly tarStub?: TarStub;
   /** Pre-seed the runner tool cache with this wp binary body (a tool-cache hit). */
   readonly cachedBin?: string;
+  /** Pre-seed a `wp.sha256` digest record next to the cached binary. */
+  readonly cachedRecord?: string;
 };
 
 function runAction(options: RunOptions) {
@@ -243,6 +245,7 @@ function runAction(options: RunOptions) {
     mkdirSync(cacheRoot, { recursive: true });
     writeFileSync(join(cacheRoot, "wp"), options.cachedBin);
     chmodSync(join(cacheRoot, "wp"), 0o755);
+    if (options.cachedRecord !== undefined) writeFileSync(join(cacheRoot, "wp.sha256"), options.cachedRecord);
   }
   const scriptPath = join(dir, "step.sh");
   writeFileSync(scriptPath, installScript);
@@ -502,10 +505,57 @@ describe("setup-wp install archive contract", () => {
       expect(run.githubEnv).toBe("");
     });
 
-    it("still skips verification on a cache hit when no checksum is given", () => {
+    it("lets a caller checksum win over a mismatching digest record", () => {
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        cachedRecord: `${"0".repeat(64)}\n`,
+        checksum: sha256(CACHED_BIN),
+      });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.output).toInclude("cached wp sha256 verified");
+      expect(run.curlUrls).toStrictEqual([]);
+    });
+  });
+
+  describe("tool-cache hit verified by the seeded digest record", () => {
+    const CACHED_BIN = "#!/bin/sh\necho cached wp\n";
+    const cacheDir = (dir: string): string => join(dir, "toolcache", "wp", VERSION, "x64");
+
+    it("accepts a cached binary whose wp.sha256 record matches, with no download", () => {
+      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, cachedRecord: `${sha256(CACHED_BIN)}\n` });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.output).toInclude("cached wp sha256 verified");
+      expect(run.curlUrls).toStrictEqual([]);
+      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${cacheDir(run.dir)}`);
+    });
+
+    it("exits 16 when the cached binary differs from its wp.sha256 record", () => {
+      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, cachedRecord: `${"0".repeat(64)}\n` });
+      expect(run.result.status, run.output).toBe(16);
+      expect(run.output).toInclude("::error::sha256 mismatch for cached wp");
+      expect(run.curlUrls).toStrictEqual([]);
+      expect(run.githubEnv).toBe("");
+    });
+
+    it("treats a hit with neither record nor checksum as a miss: downloads, verifies and installs from the archive", () => {
       const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN });
       expect(run.result.status, run.output).toBe(0);
-      expect(run.output).not.toInclude("sha256 verified");
+      expect(run.curlUrls).toStrictEqual([`${BASE_URL}/${archiveName("linux-x64")}`, `${BASE_URL}/${sidecarName("linux-x64")}`]);
+      expect(run.output).toInclude("archive sha256 verified against sidecar");
+      const installed = join(run.dir, "webpresso-wp", "wp");
+      expect(readFileSync(installed, "utf8")).toBe(FIXTURE_BIN);
+      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp")}`);
+      expect(run.githubEnv).not.toInclude(`WP_INSTALL_DIR=${cacheDir(run.dir)}`);
+      expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
+      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(sha256(FIXTURE_BIN));
+    });
+
+    it("writes a wp.sha256 record when it seeds the cache from a verified archive", () => {
+      const run = runAction({ target: "linux-x64" });
+      expect(run.result.status, run.output).toBe(0);
+      expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
+      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(sha256(FIXTURE_BIN));
     });
   });
 

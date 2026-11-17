@@ -537,4 +537,30 @@ describe("toolchain exceptions", () => {
     expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
     expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
   });
+
+  // The sign-in step's branches are proven against a stub wp in
+  // setup-wp-auth.test.ts. This job proves the one branch a stub cannot: the
+  // in-repo action installs a real published pre-login release with auth auto
+  // and NO id-token, and leaves the job signed out and unchanged.
+  it("self-test.yml proves the setup-wp sign-in skip path live without an id-token", () => {
+    const workflow = loadYaml(WORKFLOW_SELF_TEST);
+    expect(dig(workflow, "permissions", "id-token")).toBeUndefined();
+
+    const job = dig(workflow, "jobs", "setup-wp-live-skip");
+    expect(job, "expected a `setup-wp-live-skip` job").toBeDefined();
+    expect(dig(job, "needs")).toBe("contract-tests");
+    expect(dig(job, "permissions")).toStrictEqual({ contents: "read" });
+
+    const steps = stepsOf(job);
+    const setup = steps.find((step) => step["uses"] === "./.github/actions/setup-wp");
+    expect(setup, "the job must run the in-repo action").toBeDefined();
+    expect(digString(setup, "with", "version")).toBe("0.0.21");
+    expect(digString(setup, "with", "auth")).toBe("auto");
+    expect(dig(setup, "with", "entitlement")).toBeUndefined();
+
+    const assertion = steps.slice(steps.indexOf(setup as YamlRecord) + 1).map((step) => step["run"]).join("\n");
+    expect(assertion).toInclude("command -v wp");
+    expect(assertion).toInclude("WP_INSTALL_DIR");
+    expect(assertion).toInclude("WEBPRESSO_HOME");
+  });
 });
