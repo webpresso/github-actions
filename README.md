@@ -31,8 +31,10 @@ real git fixtures).
 bun test
 ```
 
-That is the whole thing: no `package.json`, no dependency install, no other
-runtime to provision. The suite lives in `test/*.test.ts` and shares
+That is the whole thing: no dependency install and no other runtime to
+provision. The root `package.json` declares only a name and `private: true`;
+it carries no scripts or dependencies and exists because `wp format` needs a
+workspace root. The suite lives in `test/*.test.ts` and shares
 `test/helpers.ts`. `node` is used _inside_ the tests to execute the workflows'
 embedded scripts, matching what the GitHub Actions runner does; it is
 preinstalled on GitHub-hosted runners and on any normal dev machine.

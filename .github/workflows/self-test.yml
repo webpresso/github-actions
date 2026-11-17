@@ -6,7 +6,8 @@ name: Self-test
 # contract could merge unnoticed. This is the gate that makes them binding.
 #
 # One toolchain, one command. The suite runs under `bun test` with zero npm
-# dependencies and no package.json (`Bun.YAML` is built in). `node` is still
+# dependencies (`Bun.YAML` is built in; the root package.json is only a
+# private workspace marker for `wp format`). `node` is still
 # used inside the tests to execute the workflows' embedded scripts -- that is
 # what the Actions runner does -- and ships preinstalled on ubuntu-latest.
 
