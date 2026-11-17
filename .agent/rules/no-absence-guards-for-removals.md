@@ -1,1 +1,0 @@
-../../../../../../versions/0.0.16/package-root/catalog/agent/rules/no-absence-guards-for-removals.md
