@@ -595,6 +595,8 @@ describe("toolchain exceptions", () => {
     expect(dig(job, "permissions")).toStrictEqual({ contents: "read" });
 
     const steps = stepsOf(job);
+    const checkout = steps.find((step) => String(step["uses"]).startsWith("actions/checkout@"));
+    expect(dig(checkout, "with", "persist-credentials")).toBe(false);
     const setup = steps.find((step) => step["uses"] === "./.github/actions/setup-wp");
     expect(setup, "the job must run the in-repo action").toBeDefined();
     expect(digString(setup, "with", "version")).toBe("0.0.21");

@@ -1,3 +1,8 @@
+---
+type: research
+last_updated: "2026-11-17"
+---
+
 # setup-wp and the login-only wp release: research note (2026-11-17)
 
 Owner blueprint: `setup-wp-account-auth` (branch `bp/setup-wp-account-auth`).
