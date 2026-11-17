@@ -3,6 +3,7 @@
 Public reusable GitHub Actions workflows for Webpresso consumer repositories.
 
 Current workflows:
+
 - `.github/workflows/webpresso-security.yml`
 - `.github/workflows/cloudflare-preview.yml`
 - `.github/workflows/cloudflare-production.yml`
@@ -32,7 +33,7 @@ bun test
 
 That is the whole thing: no `package.json`, no dependency install, no other
 runtime to provision. The suite lives in `test/*.test.ts` and shares
-`test/helpers.ts`. `node` is used *inside* the tests to execute the workflows'
+`test/helpers.ts`. `node` is used _inside_ the tests to execute the workflows'
 embedded scripts, matching what the GitHub Actions runner does; it is
 preinstalled on GitHub-hosted runners and on any normal dev machine.
 
@@ -40,11 +41,13 @@ preinstalled on GitHub-hosted runners and on any normal dev machine.
 every push to `main`, so a broken contract cannot merge green.
 
 Shared toolchain action (`setup-webpresso-toolchain`):
+
 - installs the caller's pnpm (from `package.json#packageManager`, read by `pnpm/action-setup`) and configures Node.js, Vite+, and (optionally) Bun
 - installs Vite+ with the immutable official setup action, which resolves the caller's pinned version from `package.json`, workspace catalogs, and the lockfile
 - configures Vite+ with `run-install: false`; dependency installation remains owned by each reusable workflow so setup never performs a duplicate install
 
 wp install contract (`setup-wp`):
+
 - every reusable workflow invokes one immutable `setup-wp` action commit from this public repository
 - `setup-wp` does not self-resolve a version: the required `version` input is an exact caller-pinned product semver, independent of the pinned action SHA; the action never resolves `latest` and never self-updates
 - `wp` comes from public `webpresso/app-releases` by direct release-asset URL, without a GitHub API call, credential, or `python3` dependency
@@ -58,6 +61,7 @@ wp install contract (`setup-wp`):
 - consumers update the reusable-workflow commit SHA and pinned product version independently
 
 Sign-in for login-only wp (`setup-wp` inputs `auth` and `entitlement`):
+
 - wp is login-only from `0.0.23`: signed out, its non-exempt commands exit 77. After the install, a second step signs wp in for the job. Input `auth` selects the mode: `auto` (the default) signs in at or above `0.0.23` and is a no-op below it, so callers on older versions run unchanged; `oidc` requires a login-only version (exit 20 otherwise); `none` never signs in and warns for a login-only version. The floor is compared on the numeric major.minor.patch core, so a `0.0.23` prerelease is login-only
 - the default sign-in runs `wp auth ci`, which requests the job's GitHub OIDC token (audience `https://api.webpresso.ai`) and exchanges it for a short-lived CI entitlement (at most 6 hours). No stored secret is involved, but the calling job must grant `permissions: id-token: write`; job-level permissions replace the defaults, so list the others too. When sign-in is required and the job has no id-token, the step fails with exit 17 before any network call and names that permission. Pull requests from forks never receive an id-token, so a login-only wp cannot sign in there
 - the entitlement is written under `RUNNER_TEMP` (`webpresso-home`, mode 0700), which the runner empties after every job, and `WEBPRESSO_HOME` is exported for later steps only on this path; it is never written to `$HOME`, a cache or an artifact. A caller-set `WEBPRESSO_HOME` whose physical path (symlinks resolved) is outside `RUNNER_TEMP` is refused with exit 21
@@ -153,7 +157,7 @@ Three things about this surface are load-bearing:
   A required input would have broken every pinned consumer on their next pin
   bump.
 - **The composite is referenced by its remote pinned SHA, never `./…`.** Inside
-  a reusable workflow a relative `uses:` resolves against the *caller's*
+  a reusable workflow a relative `uses:` resolves against the _caller's_
   checkout, which does not exist at step 0. The pin must also stay **reachable
   from a branch**: Actions refuses to resolve a `uses:` pin to an unreachable
   commit — the classic source being a squash-merged PR branch that was then
@@ -162,12 +166,13 @@ Three things about this surface are load-bearing:
   request so that failure surfaces here rather than in a consumer's deploy.
 - **`job_timeout_minutes` exists because callers cannot bound a `uses:` job.**
   `timeout-minutes` is not permitted on a job that calls a reusable workflow, so
-  the bound has to be exposed from inside. This *adds a missing* bound rather
+  the bound has to be exposed from inside. This _adds a missing_ bound rather
   than raising one: `cloudflare-production.yml` and `changesets-release.yml`
   previously had none, so a hung run held the caller's concurrency lock until
   GitHub's 6h default.
 
 Security contract:
+
 - reusable deployment workflows use repo-owned secret profiles and require a
   `secret_profile` input plus a
   run-capable `secret_sink`; only deploy, destroy, and rollback execute through

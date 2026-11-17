@@ -2,5 +2,5 @@
   "printWidth": 100,
   "tabWidth": 2,
   "useTabs": false,
-  "ignorePatterns": ["blueprints/**"]
+  "ignorePatterns": ["blueprints/**", "docs/reviews/**"]
 }

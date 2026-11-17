@@ -8,7 +8,15 @@
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { ACTION_SETUP_WP, asRecord, dig, loadYaml, makeTempDir } from "./helpers.ts";
@@ -43,7 +51,15 @@ function sha256(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-type TarEntryType = "file" | "dir" | "symlink" | "hardlink" | "chardev" | "blockdev" | "fifo" | "pax";
+type TarEntryType =
+  | "file"
+  | "dir"
+  | "symlink"
+  | "hardlink"
+  | "chardev"
+  | "blockdev"
+  | "fifo"
+  | "pax";
 type TarEntry = {
   readonly name: string;
   readonly type: TarEntryType;
@@ -53,7 +69,16 @@ type TarEntry = {
   readonly size?: number;
 };
 
-const TAR_TYPEFLAG: Record<TarEntryType, string> = { file: "0", dir: "5", symlink: "2", hardlink: "1", chardev: "3", blockdev: "4", fifo: "6", pax: "x" };
+const TAR_TYPEFLAG: Record<TarEntryType, string> = {
+  file: "0",
+  dir: "5",
+  symlink: "2",
+  hardlink: "1",
+  chardev: "3",
+  blockdev: "4",
+  fifo: "6",
+  pax: "x",
+};
 
 /** One pax extended-header record, with its self-inclusive decimal length prefix. */
 function paxRecord(key: string, value: string): string {
@@ -138,9 +163,13 @@ function buildFixture({
   if (archiveBytes !== undefined) {
     writeFileSync(archivePath, archiveBytes);
   } else if (entries === undefined) {
-    const tar = spawnSync("tar", ["-czf", archivePath, "-C", content, "bin", "package-root", "manifest.json"], {
-      encoding: "utf8",
-    });
+    const tar = spawnSync(
+      "tar",
+      ["-czf", archivePath, "-C", content, "bin", "package-root", "manifest.json"],
+      {
+        encoding: "utf8",
+      },
+    );
     if (tar.status !== 0) throw new Error(`fixture tar failed: ${tar.stderr}`);
   } else {
     writeFileSync(archivePath, tarGz(entries));
@@ -168,12 +197,14 @@ function buildFixture({
 type TarStub = "record" | "plant-bin-wp" | "plant-package-root" | "plant-hardlink" | "plant-fifo";
 
 function tarStubScript(mode: TarStub): string {
-  const lines = ['#!/bin/bash', 'echo "$*" >> "${TAR_LOG}"'];
+  const lines = ["#!/bin/bash", 'echo "$*" >> "${TAR_LOG}"'];
   if (mode === "record") return `${lines.join("\n")}\nexit 0\n`;
   const plants: Record<Exclude<TarStub, "record">, string> = {
     "plant-bin-wp": 'mkdir -p "${stage}/bin"; ln -s /bin/sh "${stage}/bin/wp"',
-    "plant-package-root": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln -s /tmp "${stage}/package-root"',
-    "plant-hardlink": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln "${stage}/bin/wp" "${stage}/bin/wp-alias"',
+    "plant-package-root":
+      'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln -s /tmp "${stage}/package-root"',
+    "plant-hardlink":
+      'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; ln "${stage}/bin/wp" "${stage}/bin/wp-alias"',
     "plant-fifo": 'mkdir -p "${stage}/bin"; echo x > "${stage}/bin/wp"; mkfifo "${stage}/bin/pipe"',
   };
   const plant = plants[mode];
@@ -196,7 +227,7 @@ function writeStubs(os: string, arch: string, tarStub?: TarStub): string {
     [
       "#!/bin/bash",
       'out=""; url=""',
-      'while [[ $# -gt 0 ]]; do',
+      "while [[ $# -gt 0 ]]; do",
       '  case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac',
       "done",
       'echo "${url}" >> "${CURL_LOG}"',
@@ -245,7 +276,8 @@ function runAction(options: RunOptions) {
     mkdirSync(cacheRoot, { recursive: true });
     writeFileSync(join(cacheRoot, "wp"), options.cachedBin);
     chmodSync(join(cacheRoot, "wp"), 0o755);
-    if (options.cachedRecord !== undefined) writeFileSync(join(cacheRoot, "wp.sha256"), options.cachedRecord);
+    if (options.cachedRecord !== undefined)
+      writeFileSync(join(cacheRoot, "wp.sha256"), options.cachedRecord);
   }
   const scriptPath = join(dir, "step.sh");
   writeFileSync(scriptPath, installScript);
@@ -294,7 +326,10 @@ describe("setup-wp install archive contract", () => {
     it(`downloads exactly ${archiveName(target)} and its sidecar on ${platform}`, () => {
       const run = runAction({ target, platform });
       expect(run.result.status, run.output).toBe(0);
-      expect(run.curlUrls).toStrictEqual([`${BASE_URL}/${archiveName(target)}`, `${BASE_URL}/${sidecarName(target)}`]);
+      expect(run.curlUrls).toStrictEqual([
+        `${BASE_URL}/${archiveName(target)}`,
+        `${BASE_URL}/${sidecarName(target)}`,
+      ]);
     });
   }
 
@@ -316,7 +351,11 @@ describe("setup-wp install archive contract", () => {
     expect(existsSync(join(packageRoot, "catalog", "x"))).toBe(true);
     expect(run.githubEnv).toInclude(`WEBPRESSO_PACKAGE_ROOT=${packageRoot}`);
     expect(run.githubEnv).toInclude("NODE_PATH=");
-    expect(lstatSync(join(run.dir, "webpresso-node-modules", "@webpresso", "agent-kit")).isSymbolicLink()).toBe(true);
+    expect(
+      lstatSync(
+        join(run.dir, "webpresso-node-modules", "@webpresso", "agent-kit"),
+      ).isSymbolicLink(),
+    ).toBe(true);
   });
 
   it("accepts a matching checksum for the extracted bin/wp", () => {
@@ -349,7 +388,9 @@ describe("setup-wp install archive contract", () => {
     it("exits 6 with a named error when the sidecar download fails", () => {
       const run = runAction({ target: "linux-x64", omitSidecar: true });
       expect(run.result.status, run.output).toBe(6);
-      expect(run.output).toInclude(`::error::download failed for ${BASE_URL}/${sidecarName("linux-x64")}`);
+      expect(run.output).toInclude(
+        `::error::download failed for ${BASE_URL}/${sidecarName("linux-x64")}`,
+      );
       expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
     });
 
@@ -413,7 +454,11 @@ describe("setup-wp install archive contract", () => {
       ["block device", [{ name: "evil-blk", type: "blockdev" }], "evil-blk"],
       ["fifo", [{ name: "evil-fifo", type: "fifo" }], "evil-fifo"],
       ["../ traversal", [{ name: "../escape", type: "file", content: "pwn\n" }], "../escape"],
-      ["nested ../ traversal", [{ name: "bin/../../escape", type: "file", content: "pwn\n" }], "bin/../../escape"],
+      [
+        "nested ../ traversal",
+        [{ name: "bin/../../escape", type: "file", content: "pwn\n" }],
+        "bin/../../escape",
+      ],
       ["bare .. entry", [{ name: "..", type: "dir" }], ".."],
       ["./../ traversal", [{ name: "./../escape", type: "file", content: "pwn\n" }], "./../escape"],
       [
@@ -422,13 +467,21 @@ describe("setup-wp install archive contract", () => {
         "../escape",
       ],
       ["name containing ' -> '", [{ name: "a -> b", type: "file", content: "x\n" }], "a -> b"],
-      ["name containing ' link to '", [{ name: "a link to b", type: "file", content: "x\n" }], "a link to b"],
+      [
+        "name containing ' link to '",
+        [{ name: "a link to b", type: "file", content: "x\n" }],
+        "a link to b",
+      ],
       ["absolute-path", [{ name: absoluteTarget, type: "file", content: "pwn\n" }], absoluteTarget],
     ];
 
     for (const [label, extra, shown] of hostile) {
       it(`refuses a ${label} entry with exit 13 and writes nothing`, () => {
-        const run = runAction({ target: "linux-x64", packageRoot: true, entries: [...GOOD_ENTRIES, ...extra] });
+        const run = runAction({
+          target: "linux-x64",
+          packageRoot: true,
+          entries: [...GOOD_ENTRIES, ...extra],
+        });
         expect(run.result.status, run.output).toBe(13);
         expect(run.output).toInclude("::error::wp-linux-x64.tar.gz has");
         expect(run.output).toInclude("refusing to extract");
@@ -443,16 +496,27 @@ describe("setup-wp install archive contract", () => {
     }
 
     it("exits 15 on a corrupt archive and extracts nothing", () => {
-      const run = runAction({ target: "linux-x64", archiveBytes: Buffer.from("this is not a tar archive\n") });
+      const run = runAction({
+        target: "linux-x64",
+        archiveBytes: Buffer.from("this is not a tar archive\n"),
+      });
       expect(run.result.status, run.output).toBe(15);
-      expect(run.output).toInclude("::error::wp-linux-x64.tar.gz cannot be listed; refusing to extract");
+      expect(run.output).toInclude(
+        "::error::wp-linux-x64.tar.gz cannot be listed; refusing to extract",
+      );
       expect(readdirSync(run.stage)).toStrictEqual([]);
       expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
     });
 
     it("exits 15 on a truncated archive and extracts nothing", () => {
-      const whole = tarGz([...GOOD_ENTRIES, { name: "big", type: "file", content: "z".repeat(200_000) }]);
-      const run = runAction({ target: "linux-x64", archiveBytes: whole.subarray(0, Math.floor(whole.length / 2)) });
+      const whole = tarGz([
+        ...GOOD_ENTRIES,
+        { name: "big", type: "file", content: "z".repeat(200_000) },
+      ]);
+      const run = runAction({
+        target: "linux-x64",
+        archiveBytes: whole.subarray(0, Math.floor(whole.length / 2)),
+      });
       expect(run.result.status, run.output).toBe(15);
       expect(readdirSync(run.stage)).toStrictEqual([]);
       expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
@@ -465,7 +529,9 @@ describe("setup-wp install archive contract", () => {
       it(`refuses ${what} found in the stage after extraction with exit 14`, () => {
         const run = runAction({ target: "linux-x64", packageRoot: true, tarStub: mode });
         expect(run.result.status, run.output).toBe(14);
-        expect(run.output).toInclude("::error::wp-linux-x64.tar.gz extracted a non-regular or hard-linked entry");
+        expect(run.output).toInclude(
+          "::error::wp-linux-x64.tar.gz extracted a non-regular or hard-linked entry",
+        );
         expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
         expect(run.githubEnv).toBe("");
@@ -479,7 +545,9 @@ describe("setup-wp install archive contract", () => {
       it(`refuses a symlinked ${label} after extraction with exit 14 and installs no wp`, () => {
         const run = runAction({ target: "linux-x64", packageRoot: true, tarStub: mode });
         expect(run.result.status, run.output).toBe(14);
-        expect(run.output).toInclude(`::error::wp-linux-x64.tar.gz extracted ${label} as a symlink; refusing to install`);
+        expect(run.output).toInclude(
+          `::error::wp-linux-x64.tar.gz extracted ${label} as a symlink; refusing to install`,
+        );
         expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
         expect(run.githubEnv).toBe("");
@@ -491,14 +559,22 @@ describe("setup-wp install archive contract", () => {
     const CACHED_BIN = "#!/bin/sh\necho cached wp\n";
 
     it("accepts a cached binary that matches checksum", () => {
-      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, checksum: sha256(CACHED_BIN) });
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        checksum: sha256(CACHED_BIN),
+      });
       expect(run.result.status, run.output).toBe(0);
       expect(run.output).toInclude("cached wp sha256 verified");
       expect(run.curlUrls).toStrictEqual([]);
     });
 
     it("exits 16 with a named error when the cached binary differs from checksum", () => {
-      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, checksum: "0".repeat(64) });
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        checksum: "0".repeat(64),
+      });
       expect(run.result.status, run.output).toBe(16);
       expect(run.output).toInclude("::error::sha256 mismatch for cached wp");
       expect(run.curlUrls).toStrictEqual([]);
@@ -523,7 +599,11 @@ describe("setup-wp install archive contract", () => {
     const cacheDir = (dir: string): string => join(dir, "toolcache", "wp", VERSION, "x64");
 
     it("accepts a cached binary whose wp.sha256 record matches, with no download", () => {
-      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, cachedRecord: `${sha256(CACHED_BIN)}\n` });
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        cachedRecord: `${sha256(CACHED_BIN)}\n`,
+      });
       expect(run.result.status, run.output).toBe(0);
       expect(run.output).toInclude("cached wp sha256 verified");
       expect(run.curlUrls).toStrictEqual([]);
@@ -531,7 +611,11 @@ describe("setup-wp install archive contract", () => {
     });
 
     it("exits 16 when the cached binary differs from its wp.sha256 record", () => {
-      const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN, cachedRecord: `${"0".repeat(64)}\n` });
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        cachedRecord: `${"0".repeat(64)}\n`,
+      });
       expect(run.result.status, run.output).toBe(16);
       expect(run.output).toInclude("::error::sha256 mismatch for cached wp");
       expect(run.curlUrls).toStrictEqual([]);
@@ -541,21 +625,28 @@ describe("setup-wp install archive contract", () => {
     it("treats a hit with neither record nor checksum as a miss: downloads, verifies and installs from the archive", () => {
       const run = runAction({ target: "linux-x64", cachedBin: CACHED_BIN });
       expect(run.result.status, run.output).toBe(0);
-      expect(run.curlUrls).toStrictEqual([`${BASE_URL}/${archiveName("linux-x64")}`, `${BASE_URL}/${sidecarName("linux-x64")}`]);
+      expect(run.curlUrls).toStrictEqual([
+        `${BASE_URL}/${archiveName("linux-x64")}`,
+        `${BASE_URL}/${sidecarName("linux-x64")}`,
+      ]);
       expect(run.output).toInclude("archive sha256 verified against sidecar");
       const installed = join(run.dir, "webpresso-wp", "wp");
       expect(readFileSync(installed, "utf8")).toBe(FIXTURE_BIN);
       expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp")}`);
       expect(run.githubEnv).not.toInclude(`WP_INSTALL_DIR=${cacheDir(run.dir)}`);
       expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
-      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(sha256(FIXTURE_BIN));
+      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(
+        sha256(FIXTURE_BIN),
+      );
     });
 
     it("writes a wp.sha256 record when it seeds the cache from a verified archive", () => {
       const run = runAction({ target: "linux-x64" });
       expect(run.result.status, run.output).toBe(0);
       expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
-      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(sha256(FIXTURE_BIN));
+      expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(
+        sha256(FIXTURE_BIN),
+      );
     });
   });
 

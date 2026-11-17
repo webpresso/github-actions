@@ -9,7 +9,15 @@
 
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { ACTION_SETUP_WP, asRecord, dig, digString, loadYaml, makeTempDir } from "./helpers.ts";
 
@@ -17,7 +25,8 @@ const action = loadYaml(ACTION_SETUP_WP);
 
 function signInStep() {
   const steps = dig(action, "runs", "steps");
-  if (!Array.isArray(steps) || steps.length < 2) throw new Error("expected a sign-in step at runs.steps[1]");
+  if (!Array.isArray(steps) || steps.length < 2)
+    throw new Error("expected a sign-in step at runs.steps[1]");
   return asRecord(steps[1], "runs.steps[1]");
 }
 
@@ -127,7 +136,9 @@ function runSignIn(options: SignInOptions) {
   if (options.fail === true) env["WP_STUB_FAIL"] = "1";
   if (options.presetHome !== undefined) {
     env["WEBPRESSO_HOME"] =
-      typeof options.presetHome === "function" ? options.presetHome(runnerTemp) : options.presetHome;
+      typeof options.presetHome === "function"
+        ? options.presetHome(runnerTemp)
+        : options.presetHome;
   }
 
   const result = spawnSync("bash", [scriptPath], { encoding: "utf8", env });
@@ -190,7 +201,9 @@ describe("setup-wp sign-in behaviour", () => {
     expect(run.githubEnv).toBe(`WEBPRESSO_HOME=${home}\n`);
     expect(statSync(home).mode & 0o777).toBe(0o700);
     expect(run.stdout).toInclude(`::add-mask::${OIDC_JWT}`);
-    const unmasked = run.output.split("\n").filter((line) => line.includes(OIDC_JWT) && !line.startsWith("::add-mask::"));
+    const unmasked = run.output
+      .split("\n")
+      .filter((line) => line.includes(OIDC_JWT) && !line.startsWith("::add-mask::"));
     expect(unmasked).toStrictEqual([]);
     expect(run.stdout).toInclude("kind ci");
     expect(run.stdout).toInclude("2026-11-18T03:00:00Z");
@@ -261,7 +274,11 @@ describe("setup-wp sign-in behaviour", () => {
   describe("(i) a caller-set WEBPRESSO_HOME must stay inside RUNNER_TEMP", () => {
     it("refuses a home outside RUNNER_TEMP with exit 21", () => {
       const outside = makeTempDir("setup-wp-outside-home-");
-      const run = runSignIn({ version: "0.0.23", idToken: true, presetHome: join(outside, "home") });
+      const run = runSignIn({
+        version: "0.0.23",
+        idToken: true,
+        presetHome: join(outside, "home"),
+      });
       expect(run.result.status, run.output).toBe(21);
       expect(run.argv).toStrictEqual([]);
       expect(existsSync(join(outside, "home"))).toBe(false);

@@ -27,13 +27,13 @@ digest sidecar (`wp-<target>.tar.gz` and `wp-<target>.tar.gz.json`). Release
 asset listings read with `gh release view <tag> --repo webpresso/app-releases`
 on 2026-11-17:
 
-| Tag | Assets | Installable by setup-wp on main |
-| --- | --- | --- |
-| v0.0.6 | flat binaries `wp-<target>`, `wp-package-root.tgz`, `wp-windows-x64.exe` | no |
-| v0.0.13 | flat binaries `wp-<target>`, `wp-package-root.tgz`, `wp-windows-x64.exe` | no |
-| v0.0.16 | `wp-<target>.tar.gz` + `.json` for five targets | yes |
-| v0.0.20 | `wp-<target>.tar.gz` + `.json` for five targets | yes |
-| v0.0.21 (Latest) | `wp-<target>.tar.gz` + `.json` for five targets | yes |
+| Tag              | Assets                                                                   | Installable by setup-wp on main |
+| ---------------- | ------------------------------------------------------------------------ | ------------------------------- |
+| v0.0.6           | flat binaries `wp-<target>`, `wp-package-root.tgz`, `wp-windows-x64.exe` | no                              |
+| v0.0.13          | flat binaries `wp-<target>`, `wp-package-root.tgz`, `wp-windows-x64.exe` | no                              |
+| v0.0.16          | `wp-<target>.tar.gz` + `.json` for five targets                          | yes                             |
+| v0.0.20          | `wp-<target>.tar.gz` + `.json` for five targets                          | yes                             |
+| v0.0.21 (Latest) | `wp-<target>.tar.gz` + `.json` for five targets                          | yes                             |
 
 Consequence: the reusable workflows pin `setup-wp@2003ca95…` with version
 `0.0.6`. Repinning them to any `setup-wp` commit that contains the archive
