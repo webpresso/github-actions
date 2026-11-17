@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "setup-wp account sign-in for login-only wp"
-status: draft
+status: planned
 complexity: M
 owner: "webpresso/github-actions"
 created: "2026-11-17"
@@ -89,7 +89,7 @@ Then edit changesets-release.yml, cloudflare-preview.yml, cloudflare-production.
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-11-17T20:15:43Z
+- verified-at: 2026-11-17T20:24:47.119Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -131,7 +131,7 @@ Then edit changesets-release.yml, cloudflare-preview.yml, cloudflare-production.
 
 | Gate | Command | Expected outcome | Last result |
 | --- | --- | --- | --- |
-| setup-wp action formatting | wp format --check --files .github/actions/setup-wp/action.yml | pass | pass |
+| setup-wp action formatting | wp format --check --files .github/actions/setup-wp/action.yml | pass | pass at 2026-11-17T20:24:47.119Z [command c20f9b3a20a43a4c] |
 
 ### Residual Unknowns
 
