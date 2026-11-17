@@ -5,7 +5,7 @@ status: planned
 complexity: M
 owner: "webpresso/github-actions"
 created: "2026-11-17"
-last_updated: "2026-11-18"
+last_updated: "2026-11-17"
 tags:
   - "setup-wp"
   - "login-only"
@@ -18,6 +18,7 @@ review_dispositions:
   - finding_id: "gate:c2d833226c3e1995:codex:gpt-6.1-sol#2"
     disposition: fixed
     evidence: "Case (f), case (b) and D12 now state that the suite reads raw process output, where GitHub's log masking does not run: the entitlement's ::add-mask:: line must be the first output line and precede every other line that contains the token (replayed wp output), while argv and GITHUB_ENV must never contain it."
+progress: 50% (1/2 tasks done, 0 blocked, updated 2026-11-17)
 ---
 
 <!-- wp-blueprint-source-v1 {"blueprint_id":"ba0cd834-ccbc-46ea-b33d-f6abcb4dcbdf","head_id":"767ae1bb-905f-4dc5-b1ba-d802ab7f6c9f","content_version_id":"60e1d375-a951-4ab1-9d66-9603d47e6ddf","relationship_revision_id":"bae96596-1e22-4da9-9cc8-8461e723f8bb"} -->
@@ -49,7 +50,12 @@ Out of scope: refusing versions below the floor or non-default release-repo mirr
 #### Task 1.1: setup-wp sign-in step, verified tool-cache hits, README and live skip proof
 <!-- wp-blueprint-task-v1 {"id":"94739f57-c6f4-416d-8cb3-55044c1ed391","ref":"1.1"} -->
 
-**Status:** todo
+**Status:** done
+**Verification:**
+
+```webpresso-evidence-v1
+[{"command":"bun test (owner worktree at S = cd003ce04712ed5c7f24c3724969d81e35353d97, origin/main after PR #62 squash merge): 171 pass, 0 fail across 9 files","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-17T23:52:36Z"},{"command":"gh run view 44200718184 --repo webpresso/github-actions (Self-test, push to main at S): contract-tests, setup-wp-live-skip (published 0.0.21, auth auto, no id-token), wait-for-checks-* all success; PR #62 merged as S = cd003ce04712ed5c7f24c3724969d81e35353d97 (setup-wp-auth-sha)","entrypoint":"GitHub Actions self-test.yml job setup-wp-live-skip","exit_code":0,"kind":"integration","result":"pass","target_files":[".github/actions/setup-wp/action.yml",".github/workflows/self-test.yml","test/setup-wp-auth.test.ts"],"ts":"2026-11-17T23:52:36Z"}]
+```
 **Wave:** 1
 **Lane:** setup-wp
 **Depends:** None
@@ -62,10 +68,10 @@ RED first: new test/setup-wp-auth.test.ts extracts the sign-in step's run script
 Then implement in .github/actions/setup-wp/action.yml (new inputs auth and entitlement, one floor constant, one auth-directory constant, the sign-in step, the cache record), update SETUP_WP_ACTION_BEHAVIOR_SHA256 and the M3 cache assertions in test/setup-wp-current-information.test.ts to the new truth, extend that test with a parity case for the sign-in contract (auth modes, entitlement, id-token: write, RUNNER_TEMP/webpresso/auth, floor 0.0.23, exit codes), and update the README setup-wp section to match, including the archive-only backward-compatibility boundary (0.0.16 or later), secret-only masking of the entitlement input, Dependabot and fork behaviour, and the research note's dated Latest row. Add a self-test.yml job that runs ./.github/actions/setup-wp with version 0.0.21 and auth auto under contents: read only, then asserts wp is on PATH and WEBPRESSO_HOME is unset; assert that job in test/workflow-shape.test.ts. In its own commit, replace the stray package.json with the two-field private workspace marker (name, private: true) and correct the README toolchain paragraph and the self-test.yml header comment to say what it is for; confirm `wp format --check --files .github/actions/setup-wp/action.yml` still passes afterwards. Format the action with wp format.
 
 **Acceptance:**
-- [ ] V1.1-red: test/setup-wp-auth.test.ts and the new cache cases are committed failing before the action changes, with every case (a)-(n) and every cache case present.
-- [ ] V1.1-green: `bun test` passes the whole suite (138 baseline tests plus the new ones) on the owner branch, recorded as task evidence with its exit code.
-- [ ] V1.1-format: `wp format --check --files .github/actions/setup-wp/action.yml` passes.
-- [ ] V1.1-live: the self-test job on PR A installs the published 0.0.21 through the in-repo action with auth auto, skips sign-in, and is green on GitHub; PR A merges and its merge commit S on main is recorded as setup-wp-auth-sha.
+- [x] V1.1-red: test/setup-wp-auth.test.ts and the new cache cases are committed failing before the action changes, with every case (a)-(n) and every cache case present.
+- [x] V1.1-green: `bun test` passes the whole suite (138 baseline tests plus the new ones) on the owner branch, recorded as task evidence with its exit code.
+- [x] V1.1-format: `wp format --check --files .github/actions/setup-wp/action.yml` passes.
+- [x] V1.1-live: the self-test job on PR A installs the published 0.0.21 through the in-repo action with auth auto, skips sign-in, and is green on GitHub; PR A merges and its merge commit S on main is recorded as setup-wp-auth-sha.
 
 ## Wave 2: 2
 
