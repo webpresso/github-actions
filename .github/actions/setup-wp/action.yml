@@ -10,7 +10,7 @@ description: >
   corruption and partial downloads, not a compromised release repository or a
   mirror set through release-repo. High-assurance consumers should pin the
   checksum input. For a login-only wp (see the auth input) a second step then
-  signs wp in with the job's GitHub OIDC token, keeping the CI entitlement
+  signs wp in with the job's GitHub OIDC token; wp keeps the CI entitlement
   under RUNNER_TEMP.
 
 inputs:
@@ -47,18 +47,22 @@ inputs:
       commands then exit 77. Sign-in runs `wp auth ci`, which exchanges the
       job's GitHub OIDC token, so the calling job needs
       `permissions: id-token: write` (pull requests from forks receive no
-      id-token). The entitlement lives under RUNNER_TEMP and WEBPRESSO_HOME
-      is exported for later steps.
+      id-token). wp keeps the entitlement in its own Actions auth directory,
+      RUNNER_TEMP/webpresso/auth, which later steps find without any
+      exported variable and the runner deletes after the job.
     required: false
     default: auto
   entitlement:
     description: >
       Break-glass only: a Webpresso entitlement to import instead of the OIDC
-      exchange, for when api.webpresso.ai cannot exchange. Pass it from a
-      secret. It is masked before any output, piped to
-      `wp auth import --stdin` (never argv or GITHUB_ENV) and takes
-      precedence over OIDC. Requires a login-only version and auth auto or
-      oidc (exit 20 otherwise).
+      exchange, for when api.webpresso.ai cannot exchange. Pass it from
+      secrets.*: the step masks it before its own output, but the runner
+      prints a composite step's env first, so only a registered secret is
+      masked from the start. It is piped to `wp auth import --stdin` (never
+      argv or GITHUB_ENV), takes precedence over OIDC and ends with a
+      warning. With a pre-login version and auth auto it is ignored with a
+      warning; with auth none, or auth oidc and a pre-login version, it
+      fails (exit 20).
     required: false
     default: ""
   package-root:
@@ -437,9 +441,15 @@ runs:
             echo "::error::setup-wp 'entitlement' is set but 'auth' is none; remove the entitlement or use auth auto"
             exit 20
           fi
-          if [[ "${login_only}" != "true" ]]; then
-            echo "::error::setup-wp 'entitlement' is set but wp ${WP_VERSION} predates sign-in (login-only from ${login_floor})"
+          if [[ "${login_only}" != "true" && "${WP_AUTH}" == "oidc" ]]; then
+            echo "::error::setup-wp 'entitlement' is set with 'auth: oidc', but wp ${WP_VERSION} predates sign-in (login-only from ${login_floor})"
             exit 20
+          fi
+          if [[ "${login_only}" != "true" ]]; then
+            # A caller that forwards the secret (for example through
+            # `secrets: inherit`) before moving to a login-only wp keeps working.
+            echo "::warning::setup-wp 'entitlement' is ignored: wp ${WP_VERSION} predates sign-in (login-only from ${login_floor})"
+            exit 0
           fi
         fi
 
@@ -464,46 +474,31 @@ runs:
           exit 17
         fi
 
-        # The entitlement must not outlive the job: it lives under RUNNER_TEMP,
-        # which the runner empties after every job, never under $HOME, a
-        # cache, an artifact or a persistent runner's disk. A caller-set
-        # WEBPRESSO_HOME is accepted only when its physical path (symlinks
-        # resolved) is inside RUNNER_TEMP, checked before anything is created.
-        refuse_home() {
-          echo "::error::WEBPRESSO_HOME '${1}' must be a directory inside RUNNER_TEMP so the CI entitlement is deleted with the job; ${2}"
-          exit 21
-        }
+        # wp owns where the CI entitlement lives: under GitHub Actions
+        # (GITHUB_ACTIONS=true with RUNNER_TEMP set) its auth directory is
+        # this one, whatever wp's home override says. The runner empties
+        # RUNNER_TEMP after every job, so the entitlement never reaches
+        # $HOME, a cache, an artifact or a persistent runner's disk. This is
+        # the single place the contract is held; wp's home is never changed.
         if [[ -z "${RUNNER_TEMP:-}" || ! -d "${RUNNER_TEMP}" ]]; then
-          refuse_home "${WEBPRESSO_HOME:-}" "RUNNER_TEMP is not set"
+          echo "::error::setup-wp needs RUNNER_TEMP, where wp keeps the CI entitlement, but it is '${RUNNER_TEMP:-}'"
+          exit 21
         fi
+        auth_dir="${RUNNER_TEMP}/webpresso/auth"
+        entitlement_file="${auth_dir}/entitlement.jwt"
         temp_real="$(cd -P -- "${RUNNER_TEMP}" && pwd -P)"
-        home="${WEBPRESSO_HOME:-${RUNNER_TEMP}/webpresso-home}"
-        while [[ "${home}" == */ && "${home}" != "/" ]]; do
-          home="${home%/}"
-        done
-        case "${home}" in
-          /*) ;;
-          *) refuse_home "${home}" "it is not an absolute path" ;;
-        esac
-        case "${home}" in
-          *$'\n'*) refuse_home "${home}" "it contains a newline" ;;
-        esac
-        case "/${home}/" in
-          */../*|*/./*) refuse_home "${home}" "it contains a dot segment" ;;
-        esac
-        probe="${home}"
-        rest=""
-        while [[ ! -d "${probe}" ]]; do
-          if [[ -e "${probe}" || -L "${probe}" ]]; then
-            refuse_home "${home}" "'${probe}' exists and is not a directory"
+
+        # Refuse anything planted on the entitlement's path before wp writes
+        # it: a symlink there would carry the write out of RUNNER_TEMP.
+        for path in "${auth_dir%/auth}" "${auth_dir}"; do
+          if [[ -L "${path}" || ( -e "${path}" && ! -d "${path}" ) ]]; then
+            echo "::error::'${path}' must be a real directory inside RUNNER_TEMP or absent; refusing to sign in"
+            exit 21
           fi
-          rest="/${probe##*/}${rest}"
-          probe="${probe%/*}"
-          probe="${probe:-/}"
         done
-        home_real="$(cd -P -- "${probe}" && pwd -P)${rest}"
-        if [[ "${home_real}" != "${temp_real}"/?* ]]; then
-          refuse_home "${home}" "it resolves to '${home_real}'"
+        if [[ -L "${entitlement_file}" || ( -e "${entitlement_file}" && ! -f "${entitlement_file}" ) ]]; then
+          echo "::error::'${entitlement_file}' exists and is not a regular file; refusing to sign in"
+          exit 21
         fi
 
         # The installed binary by path, never by PATH lookup.
@@ -513,29 +508,23 @@ runs:
           exit 18
         fi
 
-        mkdir -p "${home}"
-        chmod 700 "${home}"
-        export WEBPRESSO_HOME="${home}"
-
-        # wp owns the auth contract: the OIDC audience, the exchange endpoint
-        # and offline verification. This step never requests a token, parses
-        # claims or writes the entitlement itself.
+        # wp owns the auth contract: the OIDC audience, the exchange endpoint,
+        # masking the GitHub ID token and offline verification. This step
+        # never requests a token, parses claims or writes the entitlement.
+        # wp's output is held in a private file until the entitlement it
+        # wrote is masked, and only then printed.
+        capture="$(mktemp "${RUNNER_TEMP}/setup-wp-auth.XXXXXX")"
+        chmod 600 "${capture}"
+        trap 'rm -f "${capture}"' EXIT
+        sign_in_status=0
         if [[ -n "${WP_ENTITLEMENT}" ]]; then
           echo "setup-wp: importing the break-glass entitlement"
-          if ! printf '%s' "${WP_ENTITLEMENT}" | "${wp_bin}" auth import --stdin; then
-            echo "::error::wp auth import --stdin refused the break-glass entitlement"
-            exit 18
-          fi
+          printf '%s' "${WP_ENTITLEMENT}" | "${wp_bin}" auth import --stdin > "${capture}" 2>&1 || sign_in_status=$?
         else
           echo "setup-wp: signing wp in with this job's GitHub OIDC token"
-          if ! "${wp_bin}" auth ci; then
-            echo "::error::wp auth ci could not exchange this job's GitHub OIDC token for a Webpresso CI entitlement"
-            exit 18
-          fi
+          "${wp_bin}" auth ci > "${capture}" 2>&1 || sign_in_status=$?
         fi
 
-        # Mask what wp wrote before anything else can print it.
-        entitlement_file="${home}/auth/entitlement.jwt"
         if [[ -f "${entitlement_file}" ]]; then
           while IFS= read -r mask_line || [[ -n "${mask_line}" ]]; do
             if [[ -n "${mask_line}" && "${mask_line}" != "${WP_ENTITLEMENT}" ]]; then
@@ -543,6 +532,30 @@ runs:
             fi
           done < "${entitlement_file}"
         fi
+
+        if (( sign_in_status != 0 )); then
+          cat "${capture}"
+          if [[ -n "${WP_ENTITLEMENT}" ]]; then
+            echo "::error::wp auth import --stdin refused the break-glass entitlement (exit ${sign_in_status})"
+          else
+            echo "::error::wp auth ci could not exchange this job's GitHub OIDC token for a Webpresso CI entitlement (exit ${sign_in_status})"
+          fi
+          exit 18
+        fi
+
+        # The entitlement must be where the contract puts it: a regular file
+        # whose physical directory is inside RUNNER_TEMP. Anything else means
+        # wp and this action disagree, so its output (which may carry an
+        # entitlement this step could not mask) is withheld.
+        entitlement_dir_real=""
+        if [[ -d "${auth_dir}" ]]; then
+          entitlement_dir_real="$(cd -P -- "${auth_dir}" && pwd -P)"
+        fi
+        if [[ -L "${entitlement_file}" || ! -f "${entitlement_file}" || "${entitlement_dir_real}" != "${temp_real}"/?* ]]; then
+          echo "::error::wp reported a successful sign-in, but '${entitlement_file}' is not a regular file inside RUNNER_TEMP; wp and setup-wp disagree on where the CI entitlement lives. wp's output is withheld."
+          exit 19
+        fi
+        cat "${capture}"
 
         if ! status_json="$("${wp_bin}" auth status --json)"; then
           echo "::error::wp auth status --json failed after sign-in"
@@ -562,5 +575,8 @@ runs:
           exit 19
         fi
 
-        echo "WEBPRESSO_HOME=${home}" >> "${GITHUB_ENV}"
-        echo "setup-wp: wp signed in (kind ${kind}, expires ${expires:-unknown})"
+        if [[ "${kind}" == "breakglass" ]]; then
+          echo "::warning::setup-wp signed wp in with a break-glass entitlement (kind breakglass, expires ${expires:-unknown}); remove the secret once the api.webpresso.ai exchange works again"
+        else
+          echo "setup-wp: wp signed in (kind ${kind}, expires ${expires:-unknown})"
+        fi

@@ -259,9 +259,9 @@ describe("setup-wp sign-in behaviour", () => {
     expect(run.result.status, run.output).toBe(0);
     expect(run.argv).toStrictEqual(["auth ci", "auth status --json"]);
     expect(run.homes).toStrictEqual(["<unset>", "<unset>"]);
-    expect(
-      readFileSync(join(run.runnerTemp, "webpresso", "auth", "entitlement.jwt"), "utf8"),
-    ).toBe(OIDC_JWT);
+    expect(readFileSync(join(run.runnerTemp, "webpresso", "auth", "entitlement.jwt"), "utf8")).toBe(
+      OIDC_JWT,
+    );
     const used = expectMaskedBeforeUse(run, OIDC_JWT);
     expect(used.length, "wp's captured output is replayed").toBeGreaterThan(0);
     expect(run.githubEnv).toBe("");
