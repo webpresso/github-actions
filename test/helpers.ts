@@ -268,20 +268,43 @@ export const SETUP_TOOLCHAIN_USES: string = soleMatch(
 /** `webpresso/github-actions/.github/actions/setup-wp@<sha>` */
 export const SETUP_WP_USES: string = soleMatch(canonicalUses, SETUP_WP_USES_RE, "setup-wp pin");
 
-/** The exact wp release semver every `setup-wp` step installs. */
-export const SETUP_WP_VERSION: string = (() => {
-  const versions = allSteps(canonicalWorkflow)
-    .filter((step) => step["uses"] === SETUP_WP_USES)
-    .map((step) => digString(step, "with", "version"))
-    .filter((value): value is string => typeof value === "string");
-  const unique = [...new Set(versions)];
-  if (unique.length !== 1) {
+/**
+ * The four caller-facing reusable workflows that install wp through
+ * `setup-wp`. Each exposes the same caller surface: the `wp_version` input and
+ * the `wp_entitlement` secret.
+ */
+export const SETUP_WP_WORKFLOWS: readonly string[] = [
+  WORKFLOW_PREVIEW,
+  WORKFLOW_PRODUCTION,
+  WORKFLOW_RELEASE,
+  WORKFLOW_SECURITY,
+];
+
+/** The workflow_call input a caller sets to choose the wp release. */
+export const WP_VERSION_INPUT = "wp_version";
+/** The optional workflow_call secret forwarded to setup-wp's break-glass `entitlement`. */
+export const WP_ENTITLEMENT_SECRET = "wp_entitlement";
+/** The exact `with.version` of every reusable-workflow setup-wp step. */
+export const SETUP_WP_VERSION_EXPRESSION = `\${{ inputs.${WP_VERSION_INPUT} }}`;
+/** The exact `with.entitlement` of every reusable-workflow setup-wp step. */
+export const SETUP_WP_ENTITLEMENT_EXPRESSION = `\${{ secrets.${WP_ENTITLEMENT_SECRET} }}`;
+
+/**
+ * The exact wp release semver a caller gets when it does not set
+ * `wp_version`: the default of that input in the canonical workflow. The
+ * suites assert every other workflow declares the same default. A function,
+ * not a module constant: a missing input fails the assertions that read it,
+ * not the load of every suite that imports this module.
+ */
+export function setupWpVersionDefault(): string {
+  const value = dig(workflowCallInputs(canonicalWorkflow), WP_VERSION_INPUT, "default");
+  if (typeof value !== "string") {
     throw new Error(
-      `expected exactly one distinct setup-wp version in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`,
+      `expected a string default for workflow_call input ${WP_VERSION_INPUT} in ${CANONICAL_PIN_WORKFLOW}`,
     );
   }
-  return unique[0] as string;
-})();
+  return value;
+}
 
 export function isToolchainUses(value: string): boolean {
   return TOOLCHAIN_USES_RE.test(value);

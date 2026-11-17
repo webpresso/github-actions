@@ -18,8 +18,13 @@ import {
   NON_TOOLCHAIN_WORKFLOWS,
   README_PATH,
   SETUP_TOOLCHAIN_USES,
+  SETUP_WP_ENTITLEMENT_EXPRESSION,
   SETUP_WP_USES,
-  SETUP_WP_VERSION,
+  setupWpVersionDefault,
+  SETUP_WP_VERSION_EXPRESSION,
+  SETUP_WP_WORKFLOWS,
+  WP_ENTITLEMENT_SECRET,
+  WP_VERSION_INPUT,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -428,7 +433,7 @@ describe("shared toolchain wiring", () => {
           );
           expect(toolchainIndex, path).toBeGreaterThanOrEqual(0);
           expect(toolchainIndex, path).toBeLessThan(index);
-          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION);
+          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION_EXPRESSION);
         });
       }
       expect(setupWpCount, path).toBeGreaterThan(0);
@@ -457,7 +462,7 @@ describe("pin consistency", () => {
     );
     expect(SETUP_WP_USES).toMatch(FULL_SHA_USES_RE);
     expect(SETUP_WP_USES).toStartWith("webpresso/github-actions/.github/actions/setup-wp@");
-    expect(SETUP_WP_VERSION).toMatch(EXACT_SEMVER_RE);
+    expect(setupWpVersionDefault()).toMatch(EXACT_SEMVER_RE);
   });
 
   it("every setup-webpresso-toolchain reference in the repo is the same full-SHA pin", () => {
@@ -476,17 +481,120 @@ describe("pin consistency", () => {
     expect([...new Set(references)]).toStrictEqual([SETUP_WP_USES]);
   });
 
-  it("every setup-wp step installs the same exact wp version", () => {
-    const versions = workflowAndActionPaths().flatMap((path) =>
+  it("every setup-wp step installs the caller's wp_version and forwards only wp_entitlement", () => {
+    const setupWpSteps = workflowAndActionPaths().flatMap((path) =>
       allStepsAnywhere(loadYaml(path))
         .filter((step) => {
           const uses = usesOfStep(step);
           return uses !== undefined && isSetupWpUses(uses);
         })
-        .map((step) => digString(step, "with", "version") ?? `<missing in ${path}>`),
+        .map((step) => [path, step] as const),
     );
-    expect(versions.length).toBeGreaterThan(0);
-    expect([...new Set(versions)]).toStrictEqual([SETUP_WP_VERSION]);
+    expect(setupWpSteps.map(([path]) => path)).toStrictEqual([...SETUP_WP_WORKFLOWS].sort());
+    for (const [path, step] of setupWpSteps) {
+      // version and entitlement only: auth stays setup-wp's default (auto), so
+      // a pre-floor caller is unchanged and a login-only one signs in.
+      expect(step["with"], path).toStrictEqual({
+        version: SETUP_WP_VERSION_EXPRESSION,
+        entitlement: SETUP_WP_ENTITLEMENT_EXPRESSION,
+      });
+    }
+  });
+});
+
+// Wave 2 of blueprint setup-wp-account-auth: the reusable workflows expose
+// the login-only caller surface while every pre-floor caller keeps working.
+describe("login-only wp caller surface", () => {
+  it("every wp workflow declares an optional wp_version input with one shared default", () => {
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const input = dig(workflowCallInputs(loadYaml(path)), WP_VERSION_INPUT);
+      expect(dig(input, "type"), path).toBe("string");
+      expect(dig(input, "required"), path).toBe(false);
+      expect(dig(input, "default"), path).toBe(setupWpVersionDefault());
+    }
+  });
+
+  // setup-wp installs only releases that publish the per-target install
+  // archive (0.0.16 or later; 0.0.6, 0.0.9, 0.0.10 and 0.0.13 publish flat
+  // binaries). The default must also be the release the self-test live job
+  // installs through the in-repo action on every pull request, so an
+  // uninstallable default cannot merge green.
+  it("the wp_version default is the archive-publishing release the live self-test installs", () => {
+    const fallback = setupWpVersionDefault();
+    expect(fallback).toMatch(EXACT_SEMVER_RE);
+    expect(
+      Bun.semver.order(fallback, "0.0.16"),
+      `${fallback} predates the install-archive contract`,
+    ).toBeGreaterThanOrEqual(0);
+
+    const liveSkip = dig(loadYaml(WORKFLOW_SELF_TEST), "jobs", "setup-wp-live-skip");
+    const liveSetup = stepsOf(liveSkip).find(
+      (step) => step["uses"] === "./.github/actions/setup-wp",
+    );
+    expect(String(dig(liveSetup, "with", "version"))).toBe(fallback);
+  });
+
+  it("every wp workflow declares an optional wp_entitlement secret", () => {
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const secret = dig(workflowCallSecrets(loadYaml(path)), WP_ENTITLEMENT_SECRET);
+      expect(secret, path).toBeDefined();
+      expect(dig(secret, "required"), path).toBe(false);
+    }
+  });
+
+  // The break-glass entitlement is a credential: it may reach setup-wp, which
+  // masks it before any output, and nothing else (no env, run, if or other
+  // action input).
+  it("secrets.wp_entitlement appears nowhere but the setup-wp entitlement input", () => {
+    for (const path of workflowAndActionPaths()) {
+      const occurrences = readRepoFile(path).split(`secrets.${WP_ENTITLEMENT_SECRET}`).length - 1;
+      const sinks = allStepsAnywhere(loadYaml(path)).filter((step) => {
+        const uses = usesOfStep(step);
+        return (
+          uses !== undefined &&
+          isSetupWpUses(uses) &&
+          digString(step, "with", "entitlement") === SETUP_WP_ENTITLEMENT_EXPRESSION
+        );
+      }).length;
+      expect(occurrences, path).toBe(sinks);
+    }
+  });
+
+  // id-token: write is job-wide: every later step can mint an OIDC token for
+  // any audience and read the CI entitlement. It belongs on exactly the jobs
+  // that run wp (preview and production also exchange it with Doppler), never
+  // on a workflow-level block and never on a job without setup-wp.
+  it("id-token: write is granted on exactly the jobs that install wp", () => {
+    for (const path of workflowPaths()) {
+      const workflow = loadYaml(path);
+      expect(dig(workflow, "permissions", "id-token"), path).toBeUndefined();
+      for (const [name, job] of Object.entries(asRecord(dig(workflow, "jobs"), "jobs"))) {
+        const installsWp = stepsOf(job).some((step) => {
+          const uses = usesOfStep(step);
+          return uses !== undefined && isSetupWpUses(uses);
+        });
+        const grant = dig(job, "permissions", "id-token");
+        expect(grant, `${path} job ${name}`).toBe(installsWp ? "write" : undefined);
+      }
+    }
+  });
+
+  it("the README documents the caller surface and the migration at the new pin", () => {
+    const readme = readRepoFile(README_PATH);
+    expect(readme).toInclude(`\`${WP_VERSION_INPUT}\``);
+    expect(readme).toInclude(`\`${WP_ENTITLEMENT_SECRET}\``);
+    expect(readme).toInclude(`defaults to \`${setupWpVersionDefault()}\``);
+    expect(readme).toInclude("refuses the run at startup");
+    expect(readme).toInclude("`secrets: inherit`");
+  });
+
+  it("the release and security jobs grant id-token: write for wp sign-in", () => {
+    expect(dig(loadYaml(WORKFLOW_RELEASE), "jobs", "release", "permissions", "id-token")).toBe(
+      "write",
+    );
+    expect(dig(loadYaml(WORKFLOW_SECURITY), "jobs", "security", "permissions", "id-token")).toBe(
+      "write",
+    );
   });
 });
 
