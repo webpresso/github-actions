@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 
 const SETUP_WP_ACTION_BEHAVIOR_SHA256 =
-  "840db78e99b0928c24e1ce83bcdec0004f7f3290d81bfe1654a0f431287e17cd";
+  "68b46bd398dfcc0cff005eb5bbc22d095070e235a9c8e50071f57564dc302b91";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
@@ -148,7 +148,7 @@ describe("setup-wp current information", () => {
     }
 
     const floor = /login_floor="([0-9.]+)"/u.exec(signInScript)?.[1];
-    expect(floor).toBe("0.0.23");
+    expect(floor).toBe("0.0.24");
     expect(wpSection).toInclude(`\`${floor}\``);
 
     const authDescription = digString(inputs["auth"], "description") ?? "";
@@ -156,7 +156,7 @@ describe("setup-wp current information", () => {
       expect(authDescription).toInclude(mode);
       expect(wpSection).toInclude(`\`${mode}\``);
     }
-    expect(authDescription).toInclude("0.0.23");
+    expect(authDescription).toInclude("0.0.24");
     expect(digString(inputs["entitlement"], "description") ?? "").toMatch(/break-glass/iu);
 
     for (const term of [

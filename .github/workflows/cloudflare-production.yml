@@ -86,12 +86,12 @@ on:
         default: ubuntu-latest
         type: string
       # Optional WITH A DEFAULT, deliberately: a caller moving its pin keeps a
-      # pre-login wp and selects the login-only release (0.0.23 or later) by
+      # pre-login wp and selects the login-only release (0.0.24 or later) by
       # this input, so the pin can move before that release exists. Forwarded
       # verbatim to setup-wp `version`, whose exact-semver check is the only
       # guard. The default must publish install archives (0.0.16 or later).
       wp_version:
-        description: "Exact wp release semver installed by setup-wp; 0.0.23 or later is login-only and signs in with the job's GitHub OIDC token"
+        description: "Exact wp release semver installed by setup-wp; 0.0.24 or later is login-only and signs in with the job's GitHub OIDC token; do not select 0.0.23, which is pre-login but which the pinned setup-wp (sign-in floor 0.0.23) would try to sign in"
         required: false
         default: "0.0.21"
         type: string
@@ -184,9 +184,9 @@ jobs:
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@f9047de30cb95d1f7ca476ec23ef46c93ac6491d
 
       # `auth` stays setup-wp's default, auto: below the login-only floor
-      # (0.0.23) the sign-in step does nothing; at or above it, it signs wp in
-      # for this job with the job's OIDC token, or with the break-glass
-      # entitlement when the caller passed one.
+      # (0.0.23 at the pinned setup-wp) the sign-in step does nothing; at or
+      # above it, it signs wp in for this job with the job's OIDC token, or
+      # with the break-glass entitlement when the caller passed one.
       - uses: webpresso/github-actions/.github/actions/setup-wp@cd003ce04712ed5c7f24c3724969d81e35353d97
         with:
           version: ${{ inputs.wp_version }}
