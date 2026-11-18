@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "setup-wp sign-in floor moves to wp 0.0.24"
-status: draft
+status: planned
 complexity: XS
 owner: "webpresso/github-actions"
 created: "2026-11-18"
@@ -14,6 +14,7 @@ review_dispositions:
   - finding_id: "gate:0472ed708200d4f8:codex:gpt-6-luna#1"
     disposition: not-a-blocker
     evidence: "D3 now records the prerelease rule. It is the parent plan's approved rule (setup-wp-account-auth: a prerelease of the floor counts as login-only), kept unchanged on purpose: a prerelease of the login-only release is cut from the gated line, and excluding prereleases would leave a gated 0.0.24 prerelease signed out, so every non-exempt command exits 77. A caller that tests a prerelease lacking the gate has the existing exit: auth none never invokes wp, only warns, and exits 0 (contract case (e)). Changing the comparison is outside this one-constant correction."
+progress: 0% (0/1 tasks done, 0 blocked, updated 2026-11-18)
 ---
 
 <!-- wp-blueprint-source-v1 {"blueprint_id":"c646af53-84c1-4f3b-93da-448c79fb0f86","head_id":"b7046d59-dbc5-4c87-b0ed-6fbb70b396ae","content_version_id":"a525c225-04e2-4772-9223-20e21dba0a27","relationship_revision_id":"6b5b38be-c9f7-4ad1-84aa-54746db081fc"} -->
@@ -64,7 +65,7 @@ Change login_floor in the sign-in step of .github/actions/setup-wp/action.yml fr
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-11-18T12:30:00.000Z
+- verified-at: 2026-11-18T02:14:32.380Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -89,7 +90,7 @@ Change login_floor in the sign-in step of .github/actions/setup-wp/action.yml fr
 
 | Gate | Command | Expected outcome | Last result |
 | --- | --- | --- | --- |
-| format | wp format --check --files .github/actions/setup-wp/action.yml | No format issues | pass |
+| format | wp format --check --files .github/actions/setup-wp/action.yml | No format issues | pass at 2026-11-18T02:14:32.380Z [command c20f9b3a20a43a4c] |
 
 ### Residual Unknowns
 
