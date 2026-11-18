@@ -1,6 +1,6 @@
 ---
 type: research
-last_updated: "2026-11-17"
+last_updated: "2026-11-18"
 ---
 
 # setup-wp and the login-only wp release: research note (2026-11-17)
@@ -16,7 +16,9 @@ this repository is where consumer CI meets them:
 - Both apps (the wp CLI and Webpresso Desktop) are login-only.
 - Offline window 72 hours, refresh every 12 hours; signup stays invite-only.
 - Exactly one login-only release: product version `0.0.23`. Version `0.0.22`
-  already shipped ungated.
+  already shipped ungated. Corrected 2026-11-18: `0.0.23` is cut without the
+  login-only gate (it has no `wp auth ci`), so the login-only release is
+  `0.0.24`; see "Correction (2026-11-18)" below.
 - Old public versions are deleted only after every consumer is repinned and
   verified (another lane owns the deletion).
 - The npm plugins are not deprecated or removed.
@@ -120,3 +122,19 @@ blueprint never reached `main`. The `wp_version` idea is carried by this
 lane, with a default the current `setup-wp` can install; the rest is not
 carried. Only its `.oxfmtrc.json` and `.gitignore` are reused verbatim, so the
 one admitted executable promotion row (`wp format --check`) can run here.
+
+## Correction (2026-11-18)
+
+wp `0.0.23` is being cut without the login-only gate: it has no `wp auth ci`
+and its commands do not exit 77 when signed out. The login-only release is
+therefore `0.0.24`. setup-wp's sign-in floor (`login_floor` in the sign-in
+step of `.github/actions/setup-wp/action.yml`) moves from `0.0.23` to
+`0.0.24`, so `auth: auto` treats `0.0.23` as pre-login and never invokes wp
+for it. The install boundary (`0.0.16`, the first release with install
+archives) is unchanged. Every statement above that names `0.0.23` as the
+login-only release reads `0.0.24` from this date; the version table and the
+deletion plan are otherwise unchanged.
+
+The reusable workflows pin setup-wp at `cd003ce0` (PR #62), whose floor is
+still `0.0.23`. Until a follow-up commit repins them to a setup-wp with the
+`0.0.24` floor, a caller must not set `wp_version` to `0.0.23`.

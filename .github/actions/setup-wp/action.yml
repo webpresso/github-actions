@@ -41,7 +41,7 @@ inputs:
   auth:
     description: >
       Sign wp in after the install. auto (default) signs in when version is
-      at or above 0.0.23, the first login-only wp, and does nothing for an
+      at or above 0.0.24, the first login-only wp, and does nothing for an
       older version; oidc requires a login-only version and signs in; none
       never signs in and warns for a login-only version, whose non-exempt
       commands then exit 77. Sign-in runs `wp auth ci`, which exchanges the
@@ -403,7 +403,7 @@ runs:
 
         # The first login-only wp release. Older releases have no sign-in and
         # must keep working unchanged, so this step is a no-op for them.
-        login_floor="0.0.23"
+        login_floor="0.0.24"
 
         case "${WP_AUTH}" in
           auto|oidc|none) ;;

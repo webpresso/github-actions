@@ -1,5 +1,5 @@
 /**
- * Sign-in contract for `setup-wp` (login-only wp from 0.0.23).
+ * Sign-in contract for `setup-wp` (login-only wp from 0.0.24).
  *
  * The sign-in step's shell is extracted from the action YAML and executed with
  * `bash`, exactly as the runner does. A stub `wp` in WP_INSTALL_DIR records
@@ -233,8 +233,8 @@ describe("setup-wp sign-in step shape", () => {
 
   it("holds the login-only floor in exactly one constant", () => {
     const script = signInScript();
-    expect(script.match(/0\.0\.23/gu)).toHaveLength(1);
-    expect(script).toInclude('login_floor="0.0.23"');
+    expect(script.match(/0\.0\.24/gu)).toHaveLength(1);
+    expect(script).toInclude('login_floor="0.0.24"');
   });
 
   it("holds wp's Actions auth directory in exactly one constant and never touches WEBPRESSO_HOME", () => {
@@ -255,7 +255,7 @@ describe("setup-wp sign-in behaviour", () => {
   });
 
   it("(b) auto at the floor runs `auth ci` once, masks the entitlement before wp's output, exports nothing", () => {
-    const run = runSignIn({ version: "0.0.23", idToken: true });
+    const run = runSignIn({ version: "0.0.24", idToken: true });
     expect(run.result.status, run.output).toBe(0);
     expect(run.argv).toStrictEqual(["auth ci", "auth status --json"]);
     expect(run.homes).toStrictEqual(["<unset>", "<unset>"]);
@@ -272,7 +272,7 @@ describe("setup-wp sign-in behaviour", () => {
   it("(b) leaves a caller-set WEBPRESSO_HOME untouched and unexported", () => {
     let home = "";
     const run = runSignIn({
-      version: "0.0.23",
+      version: "0.0.24",
       idToken: true,
       presetHome: (runnerTemp) => {
         home = join(runnerTemp, "caller-home");
@@ -286,7 +286,7 @@ describe("setup-wp sign-in behaviour", () => {
   });
 
   it("(c) required sign-in without an id-token or entitlement exits 17 naming the permission", () => {
-    const run = runSignIn({ version: "0.0.23" });
+    const run = runSignIn({ version: "0.0.24" });
     expect(run.result.status, run.output).toBe(17);
     expect(run.output).toInclude("permissions: id-token: write");
     expect(run.output).toMatch(/fork/iu);
@@ -302,7 +302,7 @@ describe("setup-wp sign-in behaviour", () => {
   });
 
   it("(e) auth none at the floor warns and never invokes wp", () => {
-    const run = runSignIn({ version: "0.0.23", auth: "none", idToken: true });
+    const run = runSignIn({ version: "0.0.24", auth: "none", idToken: true });
     expect(run.result.status, run.output).toBe(0);
     expect(run.output).toInclude("::warning::");
     expect(run.argv).toStrictEqual([]);
@@ -311,7 +311,7 @@ describe("setup-wp sign-in behaviour", () => {
 
   it("(f) a break-glass entitlement is masked first, piped on stdin, warned about, and never leaks", () => {
     const run = runSignIn({
-      version: "0.0.23",
+      version: "0.0.24",
       entitlement: BREAKGLASS_JWT,
       idToken: true,
       status: { state: "signed-in", kind: "breakglass" },
@@ -331,7 +331,7 @@ describe("setup-wp sign-in behaviour", () => {
 
   it("(g) an entitlement with auth none, or with oidc below the floor, exits 20", () => {
     for (const options of [
-      { version: "0.0.23", auth: "none" },
+      { version: "0.0.24", auth: "none" },
       { version: "0.0.21", auth: "oidc" },
     ]) {
       const run = runSignIn({ ...options, entitlement: BREAKGLASS_JWT, idToken: true });
@@ -352,7 +352,7 @@ describe("setup-wp sign-in behaviour", () => {
 
   it("(h) an unknown auth value exits 20", () => {
     for (const auth of ["always", "", "OIDC"]) {
-      const run = runSignIn({ version: "0.0.23", auth, idToken: true });
+      const run = runSignIn({ version: "0.0.24", auth, idToken: true });
       expect(run.result.status, `'${auth}': ${run.output}`).toBe(20);
       expect(run.argv).toStrictEqual([]);
     }
@@ -360,7 +360,7 @@ describe("setup-wp sign-in behaviour", () => {
 
   describe("(i) the entitlement cannot be redirected out of RUNNER_TEMP", () => {
     it("refuses a missing RUNNER_TEMP with exit 21", () => {
-      const run = runSignIn({ version: "0.0.23", idToken: true, noRunnerTemp: true });
+      const run = runSignIn({ version: "0.0.24", idToken: true, noRunnerTemp: true });
       expect(run.result.status, run.output).toBe(21);
       expect(run.argv).toStrictEqual([]);
     });
@@ -372,7 +372,7 @@ describe("setup-wp sign-in behaviour", () => {
       it(`refuses ${name} planted as a symlink with exit 21 and writes nothing outside`, () => {
         const outside = makeTempDir("setup-wp-redirect-");
         const run = runSignIn({
-          version: "0.0.23",
+          version: "0.0.24",
           idToken: true,
           prepare: (runnerTemp) => {
             const link = join(runnerTemp, ...relative);
@@ -388,7 +388,7 @@ describe("setup-wp sign-in behaviour", () => {
 
       it(`refuses ${name} planted as a file with exit 21`, () => {
         const run = runSignIn({
-          version: "0.0.23",
+          version: "0.0.24",
           idToken: true,
           prepare: (runnerTemp) => {
             const path = join(runnerTemp, ...relative);
@@ -406,7 +406,7 @@ describe("setup-wp sign-in behaviour", () => {
       const target = join(outside, "target.jwt");
       writeFileSync(target, "original");
       const run = runSignIn({
-        version: "0.0.23",
+        version: "0.0.24",
         idToken: true,
         prepare: (runnerTemp) => {
           const authDir = join(runnerTemp, "webpresso", "auth");
@@ -421,7 +421,7 @@ describe("setup-wp sign-in behaviour", () => {
 
     it("refuses an existing entitlement.jwt that is a directory with exit 21", () => {
       const run = runSignIn({
-        version: "0.0.23",
+        version: "0.0.24",
         idToken: true,
         prepare: (runnerTemp) => {
           mkdirSync(join(runnerTemp, "webpresso", "auth", "entitlement.jwt"), {
@@ -435,7 +435,7 @@ describe("setup-wp sign-in behaviour", () => {
 
     it("accepts an existing real auth directory holding a regular stale entitlement", () => {
       const run = runSignIn({
-        version: "0.0.23",
+        version: "0.0.24",
         idToken: true,
         prepare: (runnerTemp) => {
           const authDir = join(runnerTemp, "webpresso", "auth");
@@ -449,11 +449,11 @@ describe("setup-wp sign-in behaviour", () => {
   });
 
   it("(j) a failing `auth ci` or `auth import` exits 18 and still prints wp's output", () => {
-    const oidc = runSignIn({ version: "0.0.23", idToken: true, fail: true });
+    const oidc = runSignIn({ version: "0.0.24", idToken: true, fail: true });
     expect(oidc.result.status, oidc.output).toBe(18);
     expect(oidc.stdout).toInclude("exchange refused");
     expect(oidc.githubEnv).toBe("");
-    const imported = runSignIn({ version: "0.0.23", entitlement: BREAKGLASS_JWT, fail: true });
+    const imported = runSignIn({ version: "0.0.24", entitlement: BREAKGLASS_JWT, fail: true });
     expect(imported.result.status, imported.output).toBe(18);
     expect(imported.stdout).toInclude("entitlement rejected");
     expect(imported.githubEnv).toBe("");
@@ -466,15 +466,25 @@ describe("setup-wp sign-in behaviour", () => {
       { state: "below-min-version", kind: "ci" },
       { state: "signed-in", kind: "user" },
     ]) {
-      const run = runSignIn({ version: "0.0.23", idToken: true, status });
+      const run = runSignIn({ version: "0.0.24", idToken: true, status });
       expect(run.result.status, `${JSON.stringify(status)}: ${run.output}`).toBe(19);
       expect(run.githubEnv).toBe("");
     }
   });
 
   it("(l) compares the floor on the numeric major.minor.patch core", () => {
-    const below = ["0.0.9", "0.0.21", "0.0.22", "0.0.22-rc.9"];
-    const atOrAbove = ["0.0.23-rc.1", "0.0.23", "0.0.100", "0.1.0", "1.0.0", "0.0.23+build.5"];
+    // 0.0.23 shipped without the login-only gate (it has no `wp auth ci`), so
+    // it and its prereleases and builds must stay on the no-op path.
+    const below = [
+      "0.0.9",
+      "0.0.21",
+      "0.0.22",
+      "0.0.22-rc.9",
+      "0.0.23",
+      "0.0.23-rc.1",
+      "0.0.23+build.5",
+    ];
+    const atOrAbove = ["0.0.24-rc.1", "0.0.24", "0.0.100", "0.1.0", "1.0.0", "0.0.24+build.5"];
     for (const version of below) {
       const run = runSignIn({ version, idToken: true });
       expect(run.result.status, `${version}: ${run.output}`).toBe(0);
@@ -489,7 +499,7 @@ describe("setup-wp sign-in behaviour", () => {
 
   it("(m) wp reporting success without an entitlement at the contract path exits 19 naming it", () => {
     for (const options of [{ noWrite: true }, { noGithubActions: true }]) {
-      const run = runSignIn({ version: "0.0.23", idToken: true, ...options });
+      const run = runSignIn({ version: "0.0.24", idToken: true, ...options });
       expect(run.result.status, `${JSON.stringify(options)}: ${run.output}`).toBe(19);
       expect(run.output).toInclude(join(run.runnerTemp, "webpresso", "auth", "entitlement.jwt"));
       expect(run.githubEnv).toBe("");
@@ -497,7 +507,7 @@ describe("setup-wp sign-in behaviour", () => {
   });
 
   it("(n) wp leaving the entitlement as a symlink exits 19", () => {
-    const run = runSignIn({ version: "0.0.23", idToken: true, symlinkWrite: true });
+    const run = runSignIn({ version: "0.0.24", idToken: true, symlinkWrite: true });
     expect(run.result.status, run.output).toBe(19);
     expect(
       lstatSync(join(run.runnerTemp, "webpresso", "auth", "entitlement.jwt")).isSymbolicLink(),
