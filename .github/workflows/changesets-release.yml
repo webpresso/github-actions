@@ -57,7 +57,12 @@ on:
         type: string
     secrets:
       # Break-glass only, for when api.webpresso.ai cannot exchange the job's
-      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else.
+      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else, and
+      # only when the caller passes it: the `release` job declares no
+      # `environment:`, and a job that calls a reusable workflow cannot declare
+      # one, so an environment secret never reaches it. Break-glass is a
+      # short-lived repository secret passed explicitly as
+      # `wp_entitlement: ${{ secrets.WP_ENTITLEMENT }}` and deleted afterwards.
       # Below the login-only floor setup-wp ignores it with a warning, so
       # passing it (or `secrets: inherit`) is safe before wp_version moves.
       wp_entitlement:

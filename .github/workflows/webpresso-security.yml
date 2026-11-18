@@ -28,7 +28,12 @@ on:
         type: string
     secrets:
       # Break-glass only, for when api.webpresso.ai cannot exchange the job's
-      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else.
+      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else, and
+      # only when the caller passes it: the `security` job declares no
+      # `environment:`, and a job that calls a reusable workflow cannot declare
+      # one, so an environment secret never reaches it. Break-glass is a
+      # short-lived repository secret passed explicitly as
+      # `wp_entitlement: ${{ secrets.WP_ENTITLEMENT }}` and deleted afterwards.
       # Below the login-only floor setup-wp ignores it with a warning, so
       # passing it (or `secrets: inherit`) is safe before wp_version moves.
       wp_entitlement:
@@ -37,16 +42,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  security:
-    name: security
+  # The third-party scanners run in their own job, without `id-token: write`:
+  # that grant is job-wide, so in the wp job they could mint OIDC tokens for
+  # any audience and read the wp CI entitlement.
+  scan:
+    name: scan
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
-      packages: read
-      # wp 0.0.23 and later signs in with the job's GitHub OIDC token. The
-      # grant is job-wide (every later step can mint a token and read the
-      # entitlement), so it stays on jobs that run wp only.
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +66,36 @@ jobs:
           scan-args: |-
             --recursive
             ./
+
+  security:
+    name: security
+    needs: scan
+    # Runs whatever `scan` concluded, so a failed scan fails this check
+    # instead of skipping it: branch protection counts a skipped required
+    # check as passing. The first step refuses unless `scan` succeeded, so
+    # the caller's commands still run only after both scanners passed.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+      # wp 0.0.23 and later signs in with the job's GitHub OIDC token. The
+      # grant is job-wide (every later step can mint a token and read the
+      # entitlement), so it stays on jobs that run wp only.
+      id-token: write
+    steps:
+      - name: Require the secret and dependency scans
+        if: ${{ needs.scan.result != 'success' }}
+        shell: bash
+        env:
+          SCAN_RESULT: ${{ needs.scan.result }}
+        run: |
+          echo "::error::The scan job (Gitleaks and OSV Scanner) ended '${SCAN_RESULT}'; the caller's security block runs only after both scanners pass."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@f9047de30cb95d1f7ca476ec23ef46c93ac6491d
 

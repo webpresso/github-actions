@@ -99,7 +99,13 @@ on:
       ci_secret_provider_token:
         required: false
       # Break-glass only, for when api.webpresso.ai cannot exchange the job's
-      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else.
+      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else. The
+      # `production` job declares `environment:`, so GitHub resolves
+      # this secret from an environment secret named
+      # WP_ENTITLEMENT in that environment when one exists, instead of the
+      # value the caller passed. That environment secret is the break-glass
+      # route here (delete it afterwards); a standing one forces break-glass
+      # on every run at a login-only wp_version, whatever the caller passes.
       # Below the login-only floor setup-wp ignores it with a warning, so
       # passing it (or `secrets: inherit`) is safe before wp_version moves.
       wp_entitlement:
