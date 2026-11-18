@@ -118,7 +118,14 @@ describe("require_checks gate placement", () => {
       // workflow at startup (startup_failure, jobs=0). It was requested here but
       // never used, and it silently blocked every fleet release from 2026-07-28.
       [WORKFLOW_PRODUCTION, "production", ["contents", "packages", "id-token", "checks"]],
-      [WORKFLOW_RELEASE, "release", ["contents", "pull-requests", "packages", "checks"]],
+      // `id-token` is requested deliberately (login-only wp signs in with the
+      // job's OIDC token); a caller moving its pin must grant it for the same
+      // startup reason, and the README states that migration step.
+      [
+        WORKFLOW_RELEASE,
+        "release",
+        ["contents", "pull-requests", "packages", "id-token", "checks"],
+      ],
     ];
 
     for (const [path, jobName, scopes] of expected) {
