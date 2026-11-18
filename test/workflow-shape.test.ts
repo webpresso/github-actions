@@ -54,6 +54,9 @@ import {
   type YamlRecord,
 } from "./helpers.ts";
 
+/** The self-test.yml job that resolves the reusable workflows' remote setup-wp pin. */
+const SETUP_WP_REMOTE_PIN_JOB = "setup-wp-remote-pin";
+
 const DEPLOY_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
   [WORKFLOW_PREVIEW, "preview"],
   [WORKFLOW_PRODUCTION, "production"],
@@ -482,7 +485,10 @@ describe("pin consistency", () => {
   });
 
   it("every setup-wp step installs the caller's wp_version and forwards only wp_entitlement", () => {
-    const setupWpSteps = workflowAndActionPaths().flatMap((path) =>
+    // self-test.yml's remote-pin job is not a caller surface; its fixed
+    // version is asserted by its own test below.
+    const callerPaths = workflowAndActionPaths().filter((path) => path !== WORKFLOW_SELF_TEST);
+    const setupWpSteps = callerPaths.flatMap((path) =>
       allStepsAnywhere(loadYaml(path))
         .filter((step) => {
           const uses = usesOfStep(step);
@@ -563,7 +569,9 @@ describe("login-only wp caller surface", () => {
   // id-token: write is job-wide: every later step can mint an OIDC token for
   // any audience and read the CI entitlement. It belongs on exactly the jobs
   // that run wp (preview and production also exchange it with Doppler), never
-  // on a workflow-level block and never on a job without setup-wp.
+  // on a workflow-level block and never on a job without setup-wp. The one
+  // exception is self-test.yml's remote-pin job, whose proof depends on
+  // running without an id-token.
   it("id-token: write is granted on exactly the jobs that install wp", () => {
     for (const path of workflowPaths()) {
       const workflow = loadYaml(path);
@@ -573,8 +581,10 @@ describe("login-only wp caller surface", () => {
           const uses = usesOfStep(step);
           return uses !== undefined && isSetupWpUses(uses);
         });
+        const signsIn =
+          installsWp && !(path === WORKFLOW_SELF_TEST && name === SETUP_WP_REMOTE_PIN_JOB);
         const grant = dig(job, "permissions", "id-token");
-        expect(grant, `${path} job ${name}`).toBe(installsWp ? "write" : undefined);
+        expect(grant, `${path} job ${name}`).toBe(signsIn ? "write" : undefined);
       }
     }
   });
@@ -815,9 +825,14 @@ describe("toolchain exceptions", () => {
 
     // Deliberately excluded from the shared-toolchain invariant above: this
     // gate runs the repo's own contract suite and is never called by a
-    // consumer, so it does not install pnpm/Vite+/wp.
+    // consumer, so it does not install pnpm/Vite+. The remote setup-wp pin
+    // appears in the one job that proves it resolves, and nowhere else.
     expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
-    expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
+    for (const [name, otherJob] of Object.entries(asRecord(dig(workflow, "jobs"), "jobs"))) {
+      if (name !== SETUP_WP_REMOTE_PIN_JOB) {
+        expect(allUses(otherJob), name).not.toContain(SETUP_WP_USES);
+      }
+    }
   });
 
   // The sign-in step's branches are proven against a stub wp in
@@ -849,5 +864,39 @@ describe("toolchain exceptions", () => {
     expect(assertion).toInclude("command -v wp");
     expect(assertion).toInclude("WP_INSTALL_DIR");
     expect(assertion).toInclude("WEBPRESSO_HOME");
+  });
+
+  // Reachability and the pinned commit's sign-in floor are properties of the
+  // remote repository, not of this YAML, so they are proven at runtime: this
+  // job resolves the very pin the reusable workflows use and installs 0.0.23
+  // (pre-login, no `wp auth ci`) with auth auto and no id-token. A pin whose
+  // floor is 0.0.23 or lower would demand an id-token there and fail with
+  // exit 17. This binds the job to the workflows' pin so the runtime proof
+  // cannot silently stop covering it.
+  it("self-test.yml resolves the reusable workflows' setup-wp pin and proves its 0.0.24 floor", () => {
+    const workflow = loadYaml(WORKFLOW_SELF_TEST);
+    const job = dig(workflow, "jobs", SETUP_WP_REMOTE_PIN_JOB);
+    expect(job, `expected a \`${SETUP_WP_REMOTE_PIN_JOB}\` job`).toBeDefined();
+    expect(dig(job, "needs")).toBe("contract-tests");
+    expect(dig(job, "permissions")).toStrictEqual({ contents: "read" });
+
+    const steps = stepsOf(job);
+    expect(
+      steps.some((step) => String(step["uses"]).startsWith("actions/checkout@")),
+      "the remote form needs no checkout",
+    ).toBe(false);
+    const setup = steps.find((step) => step["uses"] === SETUP_WP_USES);
+    expect(setup, "the job must run the reusable workflows' exact setup-wp pin").toBeDefined();
+    expect(String(dig(setup, "with", "version"))).toBe("0.0.23");
+    expect(digString(setup, "with", "auth")).toBe("auto");
+    expect(dig(setup, "with", "entitlement")).toBeUndefined();
+
+    const assertion = steps
+      .slice(steps.indexOf(setup as YamlRecord) + 1)
+      .map((step) => step["run"])
+      .join("\n");
+    expect(assertion).toInclude("command -v wp");
+    expect(assertion).toInclude("WP_INSTALL_DIR");
+    expect(assertion).toInclude("${RUNNER_TEMP}/webpresso/auth/entitlement.jwt");
   });
 });
