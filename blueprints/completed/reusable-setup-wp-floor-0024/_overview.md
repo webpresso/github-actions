@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "Reusable workflows pin setup-wp at the 0.0.24 sign-in floor"
-status: planned
+status: completed
 complexity: XS
 owner: "webpresso/github-actions"
 created: "2026-11-18"
@@ -17,7 +17,8 @@ review_dispositions:
   - finding_id: "gate:ded3abf05ea9cd74:codex:gpt-6-luna#2"
     disposition: fixed
     evidence: "Acceptance requires `git grep -n login_floor= 56134240116afe7a3c6da92245de1adc04b08a64 -- .github/actions/setup-wp/action.yml` to print login_floor=\"0.0.24\" (it does; cd003ce0 prints 0.0.23). The new setup-wp-remote-pin self-test job installs the published pre-login release 0.0.23 through the remote pin with auth auto and no id-token and asserts wp is installed and signed out: at the old pin that same step fails with exit 17 (sign-in required, no id-token), so the job discriminates the two pins live. The 0.0.24 sign-in path is proven by the stub-wp contract suite (setup-wp-auth.test.ts), which tests the action content at that commit; 0.0.24 is not published yet, so it cannot be installed live."
-progress: 0% (0/1 tasks done, 0 blocked, updated 2026-11-18)
+progress: 100% (1/1 tasks done, 0 blocked, updated 2026-11-18)
+completed_at: "2026-11-18"
 ---
 
 <!-- wp-blueprint-source-v1 {"blueprint_id":"c5d0c0ca-bbed-42d9-9162-d857180d4c96","head_id":"e5a8bca8-b0b5-496b-8e57-5f40ea1e515e","content_version_id":"484f1c27-b620-42b5-8f27-03280c699f8f","relationship_revision_id":"8d0baef0-a4ee-4b8b-a65b-5a7fed214e18"} -->
@@ -47,7 +48,12 @@ The contract suite needs no literal SHA: test/helpers.ts derives the setup-wp pi
 #### Task 1.1: Repin setup-wp in the reusable workflows to the 0.0.24-floor commit, prove the pin live, and drop the 0.0.23 caveat
 <!-- wp-blueprint-task-v1 {"id":"a99bcf2f-0d63-43f5-87ed-ac853abf59d8","ref":"1.1"} -->
 
-**Status:** todo
+**Status:** done
+**Verification:**
+
+```webpresso-evidence-v1
+[{"agent":"claude-opus-5-5","command":"bun test","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-18T08:46:00.000Z"},{"agent":"claude-opus-5-5","audit_kind":"format","command":"wp format --check --files <the 7 changed files>","kind":"audit","passed":true,"result":"pass","ts":"2026-11-18T08:45:00.000Z"},{"agent":"claude-opus-5-5","command":"git grep -n login_floor= 56134240116afe7a3c6da92245de1adc04b08a64 -- .github/actions/setup-wp/action.yml (prints login_floor=\"0.0.24\")","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-18T08:30:00.000Z"},{"agent":"claude-opus-5-5","command":"git merge-base --is-ancestor 56134240116afe7a3c6da92245de1adc04b08a64 origin/main","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-18T08:30:00.000Z"},{"agent":"claude-opus-5-5","command":"gh api repos/webpresso/github-actions/compare/56134240116afe7a3c6da92245de1adc04b08a64...main --jq .status (identical)","exit_code":0,"kind":"test","result":"pass","ts":"2026-11-18T08:30:00.000Z"},{"agent":"claude-opus-5-5","command":"rg -n -e cd003ce -e 'do not select 0' .github test README.md (one hit: the README history note on earlier commits)","dispositioned_count":1,"expected_count":1,"kind":"enumeration","result":"pass","ts":"2026-11-18T08:45:00.000Z"}]
+```
 **Wave:** 1
 **Lane:** workflows
 **Depends:** None
@@ -55,12 +61,12 @@ The contract suite needs no literal SHA: test/helpers.ts derives the setup-wp pi
 In changesets-release.yml, cloudflare-preview.yml, cloudflare-production.yml and webpresso-security.yml change the setup-wp `uses:` pin from cd003ce04712ed5c7f24c3724969d81e35353d97 to 56134240116afe7a3c6da92245de1adc04b08a64, remove the do-not-select-0.0.23 clause from the wp_version description, and change the sign-in comment to name 0.0.24 as the floor of the pinned setup-wp. In README.md replace the bullet that says the workflows still pin cd003ce0 with one naming the new pin 56134240 and its 0.0.24 floor (0.0.23 installs and stays signed out). Keep the wp_version default 0.0.21. In self-test.yml add a job setup-wp-remote-pin (needs contract-tests, permissions contents: read only, no checkout) whose setup-wp step uses the exact remote pin with version 0.0.23 and auth auto, followed by a step asserting wp resolves to WP_INSTALL_DIR/wp and WEBPRESSO_HOME is unset. In test/workflow-shape.test.ts add a test that this job exists with that shape and that its pin equals SETUP_WP_USES, and narrow the assertion that self-test.yml never contains SETUP_WP_USES so it holds for every job except setup-wp-remote-pin. Before pushing, confirm the pin with git grep (login_floor="0.0.24" at the pinned commit), git merge-base --is-ancestor against origin/main, and the GitHub compare API. Run bun test, the command the Self-test workflow runs, and wp format --check on every changed file.
 
 **Acceptance:**
-- [ ] Every setup-wp reference in the four reusable workflows and in the setup-wp-remote-pin job is webpresso/github-actions/.github/actions/setup-wp@56134240116afe7a3c6da92245de1adc04b08a64, and no file outside blueprints/ and the dated research note names cd003ce0 as the current pin
-- [ ] git grep at 56134240116afe7a3c6da92245de1adc04b08a64 shows login_floor="0.0.24" in .github/actions/setup-wp/action.yml, the commit is an ancestor of origin/main, and the GitHub compare API from it to main reports identical or behind
-- [ ] self-test.yml has a setup-wp-remote-pin job that installs 0.0.23 through the remote pin with auth auto and no id-token and asserts wp is installed and signed out, and a contract test binds its pin to the reusable workflows' pin
-- [ ] No wp_version description or README bullet tells callers to avoid 0.0.23, and the wp_version default is still 0.0.21
-- [ ] bun test passes for the full contract suite
-- [ ] wp format --check passes on every changed file
+- [x] Every setup-wp reference in the four reusable workflows and in the setup-wp-remote-pin job is webpresso/github-actions/.github/actions/setup-wp@56134240116afe7a3c6da92245de1adc04b08a64, and no file outside blueprints/ and the dated research note names cd003ce0 as the current pin
+- [x] git grep at 56134240116afe7a3c6da92245de1adc04b08a64 shows login_floor="0.0.24" in .github/actions/setup-wp/action.yml, the commit is an ancestor of origin/main, and the GitHub compare API from it to main reports identical or behind
+- [x] self-test.yml has a setup-wp-remote-pin job that installs 0.0.23 through the remote pin with auth auto and no id-token and asserts wp is installed and signed out, and a contract test binds its pin to the reusable workflows' pin
+- [x] No wp_version description or README bullet tells callers to avoid 0.0.23, and the wp_version default is still 0.0.21
+- [x] bun test passes for the full contract suite
+- [x] wp format --check passes on every changed file
 
 ## Trust Dossier
 
