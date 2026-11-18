@@ -579,6 +579,130 @@ describe("login-only wp caller surface", () => {
     }
   });
 
+  // The grant reaches every step of the job, so every action not owned by
+  // this repository (or actions/checkout) that runs under it is listed here
+  // deliberately: Doppler's CLI installer in the deploy jobs and the
+  // changesets action that publishes in the release job. The security
+  // workflow's scanners run in a separate job without the grant.
+  it("third-party actions run under id-token: write only where listed", () => {
+    const allowed: Record<string, readonly string[]> = {
+      [WORKFLOW_PREVIEW]: ["DopplerHQ/cli-action"],
+      [WORKFLOW_PRODUCTION]: ["DopplerHQ/cli-action"],
+      [WORKFLOW_RELEASE]: ["changesets/action"],
+    };
+    for (const path of workflowPaths()) {
+      const workflow = loadYaml(path);
+      const thirdParty: string[] = [];
+      for (const job of Object.values(asRecord(dig(workflow, "jobs"), "jobs"))) {
+        if (dig(job, "permissions", "id-token") !== "write") {
+          continue;
+        }
+        for (const step of stepsOf(job)) {
+          const uses = usesOfStep(step);
+          if (
+            uses === undefined ||
+            uses.startsWith("./") ||
+            uses.startsWith("webpresso/github-actions/") ||
+            uses.startsWith("actions/checkout@")
+          ) {
+            continue;
+          }
+          thirdParty.push(uses.slice(0, uses.indexOf("@")));
+        }
+      }
+      expect(thirdParty.sort(), path).toStrictEqual([...(allowed[path] ?? [])].sort());
+    }
+  });
+
+  it("the security scanners run in a scan job the wp job requires to succeed", () => {
+    const jobs = asRecord(dig(loadYaml(WORKFLOW_SECURITY), "jobs"), "jobs");
+    expect(Object.keys(jobs).sort()).toStrictEqual(["scan", "security"]);
+    const scan = jobs["scan"];
+    expect(dig(scan, "permissions")).toStrictEqual({ contents: "read" });
+    expect(stepsOf(scan).map((step) => usesOfStep(step))).toStrictEqual([
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e",
+      "google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67",
+    ]);
+
+    // A failed scan must fail the `security` check, not skip it: a skipped
+    // required check passes branch protection.
+    const security = jobs["security"];
+    expect(dig(security, "name")).toBe("security");
+    expect(dig(security, "needs")).toBe("scan");
+    expect(dig(security, "if")).toBe("${{ !cancelled() }}");
+    const [guard] = stepsOf(security);
+    expect(dig(guard, "if")).toBe("${{ needs.scan.result != 'success' }}");
+    expect(dig(guard, "env", "SCAN_RESULT")).toBe("${{ needs.scan.result }}");
+    expect(String(dig(guard, "run"))).toInclude("exit 1");
+  });
+
+  it("the security scan guard fails for every scan result but success", () => {
+    const [guard] = stepsOf(asRecord(dig(loadYaml(WORKFLOW_SECURITY), "jobs"), "jobs")["security"]);
+    const script = String(dig(guard, "run"));
+    for (const result of ["failure", "cancelled", "skipped"]) {
+      let status = 0;
+      let output = "";
+      try {
+        execFileSync("bash", ["-c", script], {
+          env: { PATH: "/usr/bin:/bin", SCAN_RESULT: result },
+          stdio: "pipe",
+        });
+      } catch (error) {
+        const failure = error as { status: number; stdout: Buffer };
+        status = failure.status;
+        output = failure.stdout.toString();
+      }
+      expect(status, result).toBe(1);
+      expect(output, result).toInclude(
+        `::error::The scan job (Gitleaks and OSV Scanner) ended '${result}'`,
+      );
+    }
+  });
+
+  // Break-glass routing depends on whether the wp job binds an environment:
+  // GitHub resolves a secret from the job's environment before the value a
+  // caller passed, and a job that calls a reusable workflow cannot declare
+  // `environment:` itself. The README and each workflow's comment must say
+  // which route applies, so they are tied here to the job structure.
+  it("break-glass routing in the README and comments matches each wp job's environment", () => {
+    const readme = readRepoFile(README_PATH);
+    const bullet = (marker: string): string => {
+      const line = readme.split("\n").find((text) => text.includes(marker));
+      expect(line, marker).toBeDefined();
+      return line as string;
+    };
+    const environmentBullet = bullet("environment secret named `WP_ENTITLEMENT`");
+    const repositoryBullet = bullet("short-lived repository secret");
+    expect(environmentBullet).toInclude("forces break-glass on every run");
+    expect(repositoryBullet).toInclude("cannot declare one");
+    expect(repositoryBullet).toInclude("wp_entitlement: ${{ secrets.WP_ENTITLEMENT }}");
+    expect(readme).toInclude("pass the secret explicitly rather than through `secrets: inherit`");
+
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const wpJobs = Object.values(asRecord(dig(loadYaml(path), "jobs"), "jobs")).filter((job) =>
+        stepsOf(job).some((step) => {
+          const uses = usesOfStep(step);
+          return uses !== undefined && isSetupWpUses(uses);
+        }),
+      );
+      expect(wpJobs.length, path).toBe(1);
+      const bindsEnvironment = dig(wpJobs[0], "environment") !== undefined;
+      const file = `\`${path.split("/").pop()}\``;
+      expect(environmentBullet.includes(file), `${path} in the environment bullet`).toBe(
+        bindsEnvironment,
+      );
+      expect(repositoryBullet.includes(file), `${path} in the repository-secret bullet`).toBe(
+        !bindsEnvironment,
+      );
+      const source = readRepoFile(path);
+      expect(source.includes("WP_ENTITLEMENT in that environment"), path).toBe(bindsEnvironment);
+      expect(source.includes("an environment secret never reaches it"), path).toBe(
+        !bindsEnvironment,
+      );
+    }
+  });
+
   it("the README documents the caller surface and the migration at the new pin", () => {
     const readme = readRepoFile(README_PATH);
     expect(readme).toInclude(`\`${WP_VERSION_INPUT}\``);
@@ -586,6 +710,13 @@ describe("login-only wp caller surface", () => {
     expect(readme).toInclude(`defaults to \`${setupWpVersionDefault()}\``);
     expect(readme).toInclude("refuses the run at startup");
     expect(readme).toInclude("`secrets: inherit`");
+    // Moving the pin moves the installed wp even for a caller that sets
+    // nothing, and the default itself moves before its release is deleted.
+    expect(readme).toInclude(
+      "moving the pin changes the installed wp even when a caller sets nothing",
+    );
+    expect(readme).toInclude(`the \`${setupWpVersionDefault()}\` default is temporary`);
+    expect(readme).toInclude("before the deletion");
   });
 
   it("the release and security jobs grant id-token: write for wp sign-in", () => {
