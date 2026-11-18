@@ -1,7 +1,7 @@
 ---
 type: blueprint
 title: "Reusable workflows pin setup-wp at the 0.0.24 sign-in floor"
-status: draft
+status: planned
 complexity: XS
 owner: "webpresso/github-actions"
 created: "2026-11-18"
@@ -17,6 +17,7 @@ review_dispositions:
   - finding_id: "gate:ded3abf05ea9cd74:codex:gpt-6-luna#2"
     disposition: fixed
     evidence: "Acceptance requires `git grep -n login_floor= 56134240116afe7a3c6da92245de1adc04b08a64 -- .github/actions/setup-wp/action.yml` to print login_floor=\"0.0.24\" (it does; cd003ce0 prints 0.0.23). The new setup-wp-remote-pin self-test job installs the published pre-login release 0.0.23 through the remote pin with auth auto and no id-token and asserts wp is installed and signed out: at the old pin that same step fails with exit 17 (sign-in required, no id-token), so the job discriminates the two pins live. The 0.0.24 sign-in path is proven by the stub-wp contract suite (setup-wp-auth.test.ts), which tests the action content at that commit; 0.0.24 is not published yet, so it cannot be installed live."
+progress: 0% (0/1 tasks done, 0 blocked, updated 2026-11-18)
 ---
 
 <!-- wp-blueprint-source-v1 {"blueprint_id":"c5d0c0ca-bbed-42d9-9162-d857180d4c96","head_id":"e5a8bca8-b0b5-496b-8e57-5f40ea1e515e","content_version_id":"484f1c27-b620-42b5-8f27-03280c699f8f","relationship_revision_id":"8d0baef0-a4ee-4b8b-a65b-5a7fed214e18"} -->
@@ -67,7 +68,7 @@ In changesets-release.yml, cloudflare-preview.yml, cloudflare-production.yml and
 
 - promotion-ready: true
 - unresolved-count: 0
-- verified-at: 2026-11-18T12:00:00.000Z
+- verified-at: 2026-11-18T08:46:08.187Z
 - trust-gate-version: v1
 
 ### Material Claims
@@ -92,13 +93,13 @@ In changesets-release.yml, cloudflare-preview.yml, cloudflare-production.yml and
 
 | Gate | Command | Expected outcome | Last result |
 | --- | --- | --- | --- |
-| format-release | wp format --check --files .github/workflows/changesets-release.yml | No format issues | not run |
-| format-preview | wp format --check --files .github/workflows/cloudflare-preview.yml | No format issues | not run |
-| format-production | wp format --check --files .github/workflows/cloudflare-production.yml | No format issues | not run |
-| format-security | wp format --check --files .github/workflows/webpresso-security.yml | No format issues | not run |
-| format-self-test | wp format --check --files .github/workflows/self-test.yml | No format issues | not run |
-| format-readme | wp format --check --files README.md | No format issues | not run |
-| format-shape-test | wp format --check --files test/workflow-shape.test.ts | No format issues | not run |
+| format-release | wp format --check --files .github/workflows/changesets-release.yml | No format issues | pass at 2026-11-18T08:46:08.187Z [command d868b66b9aa25cbd] |
+| format-preview | wp format --check --files .github/workflows/cloudflare-preview.yml | No format issues | pass at 2026-11-18T08:46:08.187Z [command 20c8cf6481babaa6] |
+| format-production | wp format --check --files .github/workflows/cloudflare-production.yml | No format issues | pass at 2026-11-18T08:46:08.187Z [command 179144820fa41505] |
+| format-security | wp format --check --files .github/workflows/webpresso-security.yml | No format issues | pass at 2026-11-18T08:46:08.187Z [command fc628fdf73bce497] |
+| format-self-test | wp format --check --files .github/workflows/self-test.yml | No format issues | pass at 2026-11-18T08:46:08.187Z [command d065b033b2302993] |
+| format-readme | wp format --check --files README.md | No format issues | pass at 2026-11-18T08:46:08.187Z [command 1d19d7e3a5c23979] |
+| format-shape-test | wp format --check --files test/workflow-shape.test.ts | No format issues | pass at 2026-11-18T08:46:08.187Z [command 3a31cf89e2eb5339] |
 
 ### Residual Unknowns
 
