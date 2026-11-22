@@ -190,7 +190,7 @@ jobs:
     needs: contract-tests
     runs-on: ubuntu-latest
     env:
-      WP_VERSION: "0.0.6"
+      WP_VERSION: "0.0.23"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -242,7 +242,7 @@ jobs:
     needs: setup-wp-cache-seed
     runs-on: ubuntu-latest
     env:
-      WP_VERSION: "0.0.6"
+      WP_VERSION: "0.0.23"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

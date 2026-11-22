@@ -935,8 +935,8 @@ describe("toolchain exceptions", () => {
 
     expect(dig(seed, "needs")).toBe("contract-tests");
     expect(dig(hit, "needs")).toBe("setup-wp-cache-seed");
-    expect(dig(seed, "env", "WP_VERSION")).toBe("0.0.6");
-    expect(dig(hit, "env", "WP_VERSION")).toBe("0.0.6");
+    expect(dig(seed, "env", "WP_VERSION")).toBe("0.0.23");
+    expect(dig(hit, "env", "WP_VERSION")).toBe("0.0.23");
 
     const seedSteps = stepsOf(seed);
     const hitSteps = stepsOf(hit);
