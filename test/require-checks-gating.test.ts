@@ -84,12 +84,16 @@ describe("require_checks gate placement", () => {
   it("precedes checkout, toolchain setup, and every credential-bearing step", () => {
     for (const [path, jobName] of REQUIRE_CHECKS_WORKFLOWS) {
       const steps = stepsOf(jobOf(path, jobName));
-      const gateIndex = steps.findIndex((step) => WAIT_FOR_CHECKS_USES_RE.test(String(step["uses"] ?? "")));
+      const gateIndex = steps.findIndex((step) =>
+        WAIT_FOR_CHECKS_USES_RE.test(String(step["uses"] ?? "")),
+      );
       expect(gateIndex, path).toBe(0);
 
       // A checkout must exist and must come later -- otherwise "first step"
       // would be trivially true for a job that never checks anything out.
-      const checkoutIndex = steps.findIndex((step) => String(step["uses"] ?? "").startsWith("actions/checkout@"));
+      const checkoutIndex = steps.findIndex((step) =>
+        String(step["uses"] ?? "").startsWith("actions/checkout@"),
+      );
       expect(checkoutIndex, `${path} has no checkout to precede`).toBeGreaterThan(gateIndex);
 
       const credentialIndexes = steps
@@ -114,7 +118,14 @@ describe("require_checks gate placement", () => {
       // workflow at startup (startup_failure, jobs=0). It was requested here but
       // never used, and it silently blocked every fleet release from 2026-07-28.
       [WORKFLOW_PRODUCTION, "production", ["contents", "packages", "id-token", "checks"]],
-      [WORKFLOW_RELEASE, "release", ["contents", "pull-requests", "packages", "checks"]],
+      // `id-token` is requested deliberately (login-only wp signs in with the
+      // job's OIDC token); a caller moving its pin must grant it for the same
+      // startup reason, and the README states that migration step.
+      [
+        WORKFLOW_RELEASE,
+        "release",
+        ["contents", "pull-requests", "packages", "id-token", "checks"],
+      ],
     ];
 
     for (const [path, jobName, scopes] of expected) {
@@ -144,7 +155,10 @@ describe("require_checks gate reference", () => {
       .flatMap((path) => allUses(loadYaml(path)))
       .filter((value) => WAIT_FOR_CHECKS_USES_RE.test(value) && !value.startsWith("./"));
     expect(remote.length).toBeGreaterThan(0);
-    expect([...new Set(remote)].length, "every remote wait-for-checks pin must be the same commit").toBe(1);
+    expect(
+      [...new Set(remote)].length,
+      "every remote wait-for-checks pin must be the same commit",
+    ).toBe(1);
   });
 
   // Reachability cannot be proven by reading YAML -- an unreachable pin is a
@@ -153,11 +167,14 @@ describe("require_checks gate reference", () => {
   // request, and an unreachable commit fails that job. This binds the two so
   // the runtime proof cannot silently stop covering the pin the workflows use.
   it("is the same commit self-test.yml resolves on every pull request", () => {
-    const selfTestPins = [...new Set(
-      allUses(loadYaml(WORKFLOW_SELF_TEST)).filter(
-        (value) => WAIT_FOR_CHECKS_USES_RE.test(value) && value.startsWith(REMOTE_WAIT_FOR_CHECKS_PREFIX),
+    const selfTestPins = [
+      ...new Set(
+        allUses(loadYaml(WORKFLOW_SELF_TEST)).filter(
+          (value) =>
+            WAIT_FOR_CHECKS_USES_RE.test(value) && value.startsWith(REMOTE_WAIT_FOR_CHECKS_PREFIX),
+        ),
       ),
-    )];
+    ];
     expect(selfTestPins.length, "self-test.yml must exercise the remote pinned form").toBe(1);
 
     for (const [path, jobName] of REQUIRE_CHECKS_WORKFLOWS) {
@@ -171,7 +188,9 @@ describe("require_checks gate wiring", () => {
     for (const [path, jobName] of REQUIRE_CHECKS_WORKFLOWS) {
       const gate = gateStepOf(path, jobName);
       expect(dig(gate, "with", "contexts"), path).toBe("${{ inputs.require_checks }}");
-      expect(dig(gate, "with", "timeout-seconds"), path).toBe("${{ inputs.require_checks_timeout_seconds }}");
+      expect(dig(gate, "with", "timeout-seconds"), path).toBe(
+        "${{ inputs.require_checks_timeout_seconds }}",
+      );
     }
   });
 
@@ -209,7 +228,9 @@ describe("job timeout bounds", () => {
       expect(dig(inputs, "job_timeout_minutes", "required"), path).toBe(false);
       expect(dig(inputs, "job_timeout_minutes", "default"), path).toBe(30);
 
-      expect(dig(jobOf(path, jobName), "timeout-minutes"), path).toBe("${{ inputs.job_timeout_minutes }}");
+      expect(dig(jobOf(path, jobName), "timeout-minutes"), path).toBe(
+        "${{ inputs.job_timeout_minutes }}",
+      );
     }
   });
 

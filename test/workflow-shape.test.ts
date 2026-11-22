@@ -18,9 +18,13 @@ import {
   NON_TOOLCHAIN_WORKFLOWS,
   README_PATH,
   SETUP_TOOLCHAIN_USES,
+  SETUP_WP_ENTITLEMENT_EXPRESSION,
   SETUP_WP_USES,
-  SETUP_WP_VERSION,
-  WORKFLOW_WEBPRESSO_FRESHNESS,
+  setupWpVersionDefault,
+  SETUP_WP_VERSION_EXPRESSION,
+  SETUP_WP_WORKFLOWS,
+  WP_ENTITLEMENT_SECRET,
+  WP_VERSION_INPUT,
   WORKFLOW_PREVIEW,
   WORKFLOW_PRODUCTION,
   WORKFLOW_RELEASE,
@@ -49,6 +53,9 @@ import {
   workflowPaths,
   type YamlRecord,
 } from "./helpers.ts";
+
+/** The self-test.yml job that resolves the reusable workflows' remote setup-wp pin. */
+const SETUP_WP_REMOTE_PIN_JOB = "setup-wp-remote-pin";
 
 const DEPLOY_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
   [WORKFLOW_PREVIEW, "preview"],
@@ -79,7 +86,9 @@ describe("deploy workflow bootstrap contract", () => {
     expect(dig(workflowCallSecrets(workflow), "ci_secret_provider_token", "required")).toBe(false);
     expect(dig(inputs, "doppler_identity_id", "type")).toBe("string");
     expect(dig(workflow, "jobs", "preview", "permissions", "id-token")).toBe("write");
-    expect(dig(workflow, "jobs", "preview", "environment")).toBe("${{ inputs.github_environment }}");
+    expect(dig(workflow, "jobs", "preview", "environment")).toBe(
+      "${{ inputs.github_environment }}",
+    );
     expect(stepUses(WORKFLOW_PREVIEW)).toContain(
       "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73",
     );
@@ -95,7 +104,9 @@ describe("deploy workflow bootstrap contract", () => {
     expect(dig(workflowCallSecrets(workflow), "ci_secret_provider_token", "required")).toBe(false);
     expect(dig(inputs, "doppler_identity_id", "type")).toBe("string");
     expect(dig(workflow, "jobs", "production", "permissions", "id-token")).toBe("write");
-    expect(dig(workflow, "jobs", "production", "environment")).toBe("${{ inputs.github_environment }}");
+    expect(dig(workflow, "jobs", "production", "environment")).toBe(
+      "${{ inputs.github_environment }}",
+    );
     expect(stepUses(WORKFLOW_PRODUCTION)).toContain(
       "DopplerHQ/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73",
     );
@@ -112,7 +123,9 @@ describe("deploy workflow bootstrap contract", () => {
       );
       expect(checkout, path).toBeDefined();
       expect(dig(checkout, "with", "ref")).toBe("${{ inputs.checkout_ref || github.sha }}");
-      expect(dig(workflow, "jobs", jobName, "environment")).toBe("${{ inputs.github_environment }}");
+      expect(dig(workflow, "jobs", jobName, "environment")).toBe(
+        "${{ inputs.github_environment }}",
+      );
     }
   });
 });
@@ -122,8 +135,8 @@ describe("secret-sink boundary", () => {
     for (const [path, jobName] of DEPLOY_WORKFLOWS) {
       const workflow = loadYaml(path);
       const job = dig(workflow, "jobs", jobName);
-      const leaking = envKeys(job === undefined ? undefined : asRecord(job, jobName)).filter((name) =>
-        /(?:TOKEN|PASSWORD|_KEY)$/u.test(name),
+      const leaking = envKeys(job === undefined ? undefined : asRecord(job, jobName)).filter(
+        (name) => /(?:TOKEN|PASSWORD|_KEY)$/u.test(name),
       );
       expect(leaking, path).toStrictEqual([]);
 
@@ -157,7 +170,10 @@ describe("secret-sink boundary", () => {
       const providerSecretSteps = steps.filter((step) =>
         JSON.stringify(step).includes("secrets.ci_secret_provider_token"),
       );
-      expect(providerSecretSteps.map((step) => step["id"]), path).toStrictEqual([...allowedIds]);
+      expect(
+        providerSecretSteps.map((step) => step["id"]),
+        path,
+      ).toStrictEqual([...allowedIds]);
 
       for (const id of ["install", "verify", "smoke"]) {
         const step = findStepById(workflow, id);
@@ -165,8 +181,13 @@ describe("secret-sink boundary", () => {
           continue;
         }
         const expected =
-          id === "install" ? ["GITHUB_TOKEN", "NODE_AUTH_TOKEN", "INSTALL_COMMAND"] : [`${id.toUpperCase()}_COMMAND`];
-        expect(envKeys(step), `${path} ${id} must remain provider-runtime-secretless`).toStrictEqual(expected);
+          id === "install"
+            ? ["GITHUB_TOKEN", "NODE_AUTH_TOKEN", "INSTALL_COMMAND"]
+            : [`${id.toUpperCase()}_COMMAND`];
+        expect(
+          envKeys(step),
+          `${path} ${id} must remain provider-runtime-secretless`,
+        ).toStrictEqual(expected);
       }
     }
   });
@@ -178,7 +199,9 @@ describe("secret-sink boundary", () => {
       expect(contents).toInclude('Unknown secret sink "${secretSink}"');
       expect(contents).toInclude("does not allow the run operation");
       expect(contents).toInclude('Unknown secret profile "${secretProfile}"');
-      expect(contents).toInclude("Infisical is not supported by the sink-scoped reusable deploy harness");
+      expect(contents).toInclude(
+        "Infisical is not supported by the sink-scoped reusable deploy harness",
+      );
     }
   });
 
@@ -201,7 +224,9 @@ describe("secret-sink boundary", () => {
       expect(contents).toInclude(
         'wp secrets run --sink "${SECRET_SINK}" --profile "${SECRET_PROFILE}" -- bash -leo pipefail -c',
       );
-      expect(contents).not.toMatch(/^\s+bash -leo pipefail -c "\$(?:DEPLOY|DESTROY|ROLLBACK)_COMMAND"$/mu);
+      expect(contents).not.toMatch(
+        /^\s+bash -leo pipefail -c "\$(?:DEPLOY|DESTROY|ROLLBACK)_COMMAND"$/mu,
+      );
     }
   });
 
@@ -233,7 +258,10 @@ describe("embedded workflow scripts", () => {
       expect(programs.length, path).toBeGreaterThan(0);
       for (const program of programs) {
         const result = nodeSyntaxCheck(program.body);
-        expect(result.status, `${path} contains invalid embedded JavaScript:\n${result.stderr}`).toBe(0);
+        expect(
+          result.status,
+          `${path} contains invalid embedded JavaScript:\n${result.stderr}`,
+        ).toBe(0);
       }
     }
   });
@@ -346,12 +374,15 @@ describe("shared toolchain wiring", () => {
   it("the shared toolchain action uses catalog-aware Vite+ setup", () => {
     const action = loadYaml(ACTION_TOOLCHAIN);
     const setupVp = stepsOf(dig(action, "runs")).find(
-      (step) => usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
+      (step) =>
+        usesOfStep(step) === "voidzero-dev/setup-vp@49c3e4e92c52e7f8392712a9267bbe71c5ab30e5",
     );
 
     expect(setupVp).toBeDefined();
     expect(dig(setupVp, "with", "run-install")).toBe(false);
-    expect(Object.keys(asRecord(dig(action, "inputs"), "inputs"))).not.toContain("cli-global-packages");
+    expect(Object.keys(asRecord(dig(action, "inputs"), "inputs"))).not.toContain(
+      "cli-global-packages",
+    );
     expect(readRepoFile(ACTION_TOOLCHAIN)).not.toInclude("npm install -g");
   });
 
@@ -367,18 +398,25 @@ describe("shared toolchain wiring", () => {
         continue;
       }
 
-      const toolchainSteps = allSteps(loadYaml(path)).filter((step) => usesOfStep(step) === SETUP_TOOLCHAIN_USES);
+      const toolchainSteps = allSteps(loadYaml(path)).filter(
+        (step) => usesOfStep(step) === SETUP_TOOLCHAIN_USES,
+      );
       expect(toolchainSteps.length, path).toBeGreaterThan(0);
       for (const step of toolchainSteps) {
-        const withKeys = step["with"] === undefined ? [] : Object.keys(asRecord(step["with"], "with"));
+        const withKeys =
+          step["with"] === undefined ? [] : Object.keys(asRecord(step["with"], "with"));
         expect(withKeys, path).not.toContain("cli-global-packages");
       }
     }
   });
 
-  it("every reusable toolchain workflow uses caller-versioned agent-kit setup", () => {
-    const candidatePaths = workflowPaths().filter((path) => !NON_TOOLCHAIN_WORKFLOWS.includes(path));
-    const toolchainPaths = candidatePaths.filter((path) => allUses(loadYaml(path)).includes(SETUP_TOOLCHAIN_USES));
+  it("every reusable toolchain workflow uses caller-versioned wp setup", () => {
+    const candidatePaths = workflowPaths().filter(
+      (path) => !NON_TOOLCHAIN_WORKFLOWS.includes(path),
+    );
+    const toolchainPaths = candidatePaths.filter((path) =>
+      allUses(loadYaml(path)).includes(SETUP_TOOLCHAIN_USES),
+    );
     expect(toolchainPaths).toStrictEqual(candidatePaths);
 
     for (const path of toolchainPaths) {
@@ -393,10 +431,12 @@ describe("shared toolchain wiring", () => {
             return;
           }
           setupWpCount += 1;
-          const toolchainIndex = steps.findIndex((candidate) => usesOfStep(candidate) === SETUP_TOOLCHAIN_USES);
+          const toolchainIndex = steps.findIndex(
+            (candidate) => usesOfStep(candidate) === SETUP_TOOLCHAIN_USES,
+          );
           expect(toolchainIndex, path).toBeGreaterThanOrEqual(0);
           expect(toolchainIndex, path).toBeLessThan(index);
-          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION);
+          expect(digString(step, "with", "version"), path).toBe(SETUP_WP_VERSION_EXPRESSION);
         });
       }
       expect(setupWpCount, path).toBeGreaterThan(0);
@@ -412,9 +452,9 @@ describe("pin consistency", () => {
   // First-party action references are immutable reviewed merge SHAs. This
   // repository intentionally has no tags; these shape and cross-reference
   // checks do not establish tag provenance (which applies to third-party pins).
-  // The setup-wp SHA, the toolchain SHA, and the agent-kit version each live at
+  // The setup-wp SHA, the toolchain SHA, and the wp version each live at
   // many irreducible YAML sites. Asserting literals here would make this file
-  // one more site every freshness bump has to edit, so the expectation is
+  // one more site every pin bump has to edit, so the expectation is
   // derived from the canonical workflow at runtime and what is asserted is
   // cross-site agreement plus value shape.
   it("derives the canonical pins from a single workflow and they are correctly shaped", () => {
@@ -425,7 +465,7 @@ describe("pin consistency", () => {
     );
     expect(SETUP_WP_USES).toMatch(FULL_SHA_USES_RE);
     expect(SETUP_WP_USES).toStartWith("webpresso/github-actions/.github/actions/setup-wp@");
-    expect(SETUP_WP_VERSION).toMatch(EXACT_SEMVER_RE);
+    expect(setupWpVersionDefault()).toMatch(EXACT_SEMVER_RE);
   });
 
   it("every setup-webpresso-toolchain reference in the repo is the same full-SHA pin", () => {
@@ -444,17 +484,258 @@ describe("pin consistency", () => {
     expect([...new Set(references)]).toStrictEqual([SETUP_WP_USES]);
   });
 
-  it("every setup-wp step installs the same exact agent-kit semver", () => {
-    const versions = workflowAndActionPaths().flatMap((path) =>
+  it("every setup-wp step installs the caller's wp_version and forwards only wp_entitlement", () => {
+    // self-test.yml's remote-pin job is not a caller surface; its fixed
+    // version is asserted by its own test below.
+    const callerPaths = workflowAndActionPaths().filter((path) => path !== WORKFLOW_SELF_TEST);
+    const setupWpSteps = callerPaths.flatMap((path) =>
       allStepsAnywhere(loadYaml(path))
         .filter((step) => {
           const uses = usesOfStep(step);
           return uses !== undefined && isSetupWpUses(uses);
         })
-        .map((step) => digString(step, "with", "version") ?? `<missing in ${path}>`),
+        .map((step) => [path, step] as const),
     );
-    expect(versions.length).toBeGreaterThan(0);
-    expect([...new Set(versions)]).toStrictEqual([SETUP_WP_VERSION]);
+    expect(setupWpSteps.map(([path]) => path)).toStrictEqual([...SETUP_WP_WORKFLOWS].sort());
+    for (const [path, step] of setupWpSteps) {
+      // version and entitlement only: auth stays setup-wp's default (auto), so
+      // a pre-floor caller is unchanged and a login-only one signs in.
+      expect(step["with"], path).toStrictEqual({
+        version: SETUP_WP_VERSION_EXPRESSION,
+        entitlement: SETUP_WP_ENTITLEMENT_EXPRESSION,
+      });
+    }
+  });
+});
+
+// Wave 2 of blueprint setup-wp-account-auth: the reusable workflows expose
+// the login-only caller surface while every pre-floor caller keeps working.
+describe("login-only wp caller surface", () => {
+  it("every wp workflow declares an optional wp_version input with one shared default", () => {
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const input = dig(workflowCallInputs(loadYaml(path)), WP_VERSION_INPUT);
+      expect(dig(input, "type"), path).toBe("string");
+      expect(dig(input, "required"), path).toBe(false);
+      expect(dig(input, "default"), path).toBe(setupWpVersionDefault());
+    }
+  });
+
+  // setup-wp installs only releases that publish the per-target install
+  // archive (0.0.16 or later; 0.0.6, 0.0.9, 0.0.10 and 0.0.13 publish flat
+  // binaries). The default must also be the release the self-test live job
+  // installs through the in-repo action on every pull request, so an
+  // uninstallable default cannot merge green.
+  it("the wp_version default is the archive-publishing release the live self-test installs", () => {
+    const fallback = setupWpVersionDefault();
+    expect(fallback).toMatch(EXACT_SEMVER_RE);
+    expect(
+      Bun.semver.order(fallback, "0.0.16"),
+      `${fallback} predates the install-archive contract`,
+    ).toBeGreaterThanOrEqual(0);
+
+    const liveSkip = dig(loadYaml(WORKFLOW_SELF_TEST), "jobs", "setup-wp-live-skip");
+    const liveSetup = stepsOf(liveSkip).find(
+      (step) => step["uses"] === "./.github/actions/setup-wp",
+    );
+    expect(String(dig(liveSetup, "with", "version"))).toBe(fallback);
+  });
+
+  it("every wp workflow declares an optional wp_entitlement secret", () => {
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const secret = dig(workflowCallSecrets(loadYaml(path)), WP_ENTITLEMENT_SECRET);
+      expect(secret, path).toBeDefined();
+      expect(dig(secret, "required"), path).toBe(false);
+    }
+  });
+
+  // The break-glass entitlement is a credential: it may reach setup-wp, which
+  // masks it before any output, and nothing else (no env, run, if or other
+  // action input).
+  it("secrets.wp_entitlement appears nowhere but the setup-wp entitlement input", () => {
+    for (const path of workflowAndActionPaths()) {
+      const occurrences = readRepoFile(path).split(`secrets.${WP_ENTITLEMENT_SECRET}`).length - 1;
+      const sinks = allStepsAnywhere(loadYaml(path)).filter((step) => {
+        const uses = usesOfStep(step);
+        return (
+          uses !== undefined &&
+          isSetupWpUses(uses) &&
+          digString(step, "with", "entitlement") === SETUP_WP_ENTITLEMENT_EXPRESSION
+        );
+      }).length;
+      expect(occurrences, path).toBe(sinks);
+    }
+  });
+
+  // id-token: write is job-wide: every later step can mint an OIDC token for
+  // any audience and read the CI entitlement. It belongs on exactly the jobs
+  // that run wp (preview and production also exchange it with Doppler), never
+  // on a workflow-level block and never on a job without setup-wp. The one
+  // exception is self-test.yml's remote-pin job, whose proof depends on
+  // running without an id-token.
+  it("id-token: write is granted on exactly the jobs that install wp", () => {
+    for (const path of workflowPaths()) {
+      const workflow = loadYaml(path);
+      expect(dig(workflow, "permissions", "id-token"), path).toBeUndefined();
+      for (const [name, job] of Object.entries(asRecord(dig(workflow, "jobs"), "jobs"))) {
+        const installsWp = stepsOf(job).some((step) => {
+          const uses = usesOfStep(step);
+          return uses !== undefined && isSetupWpUses(uses);
+        });
+        const signsIn =
+          installsWp && !(path === WORKFLOW_SELF_TEST && name === SETUP_WP_REMOTE_PIN_JOB);
+        const grant = dig(job, "permissions", "id-token");
+        expect(grant, `${path} job ${name}`).toBe(signsIn ? "write" : undefined);
+      }
+    }
+  });
+
+  // The grant reaches every step of the job, so every action not owned by
+  // this repository (or actions/checkout) that runs under it is listed here
+  // deliberately: Doppler's CLI installer in the deploy jobs and the
+  // changesets action that publishes in the release job. The security
+  // workflow's scanners run in a separate job without the grant.
+  it("third-party actions run under id-token: write only where listed", () => {
+    const allowed: Record<string, readonly string[]> = {
+      [WORKFLOW_PREVIEW]: ["DopplerHQ/cli-action"],
+      [WORKFLOW_PRODUCTION]: ["DopplerHQ/cli-action"],
+      [WORKFLOW_RELEASE]: ["changesets/action"],
+    };
+    for (const path of workflowPaths()) {
+      const workflow = loadYaml(path);
+      const thirdParty: string[] = [];
+      for (const job of Object.values(asRecord(dig(workflow, "jobs"), "jobs"))) {
+        if (dig(job, "permissions", "id-token") !== "write") {
+          continue;
+        }
+        for (const step of stepsOf(job)) {
+          const uses = usesOfStep(step);
+          if (
+            uses === undefined ||
+            uses.startsWith("./") ||
+            uses.startsWith("webpresso/github-actions/") ||
+            uses.startsWith("actions/checkout@")
+          ) {
+            continue;
+          }
+          thirdParty.push(uses.slice(0, uses.indexOf("@")));
+        }
+      }
+      expect(thirdParty.sort(), path).toStrictEqual([...(allowed[path] ?? [])].sort());
+    }
+  });
+
+  it("the security scanners run in a scan job the wp job requires to succeed", () => {
+    const jobs = asRecord(dig(loadYaml(WORKFLOW_SECURITY), "jobs"), "jobs");
+    expect(Object.keys(jobs).sort()).toStrictEqual(["scan", "security"]);
+    const scan = jobs["scan"];
+    expect(dig(scan, "permissions")).toStrictEqual({ contents: "read" });
+    expect(stepsOf(scan).map((step) => usesOfStep(step))).toStrictEqual([
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e",
+      "google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67",
+    ]);
+
+    // A failed scan must fail the `security` check, not skip it: a skipped
+    // required check passes branch protection.
+    const security = jobs["security"];
+    expect(dig(security, "name")).toBe("security");
+    expect(dig(security, "needs")).toBe("scan");
+    expect(dig(security, "if")).toBe("${{ !cancelled() }}");
+    const [guard] = stepsOf(security);
+    expect(dig(guard, "if")).toBe("${{ needs.scan.result != 'success' }}");
+    expect(dig(guard, "env", "SCAN_RESULT")).toBe("${{ needs.scan.result }}");
+    expect(String(dig(guard, "run"))).toInclude("exit 1");
+  });
+
+  it("the security scan guard fails for every scan result but success", () => {
+    const [guard] = stepsOf(asRecord(dig(loadYaml(WORKFLOW_SECURITY), "jobs"), "jobs")["security"]);
+    const script = String(dig(guard, "run"));
+    for (const result of ["failure", "cancelled", "skipped"]) {
+      let status = 0;
+      let output = "";
+      try {
+        execFileSync("bash", ["-c", script], {
+          env: { PATH: "/usr/bin:/bin", SCAN_RESULT: result },
+          stdio: "pipe",
+        });
+      } catch (error) {
+        const failure = error as { status: number; stdout: Buffer };
+        status = failure.status;
+        output = failure.stdout.toString();
+      }
+      expect(status, result).toBe(1);
+      expect(output, result).toInclude(
+        `::error::The scan job (Gitleaks and OSV Scanner) ended '${result}'`,
+      );
+    }
+  });
+
+  // Break-glass routing depends on whether the wp job binds an environment:
+  // GitHub resolves a secret from the job's environment before the value a
+  // caller passed, and a job that calls a reusable workflow cannot declare
+  // `environment:` itself. The README and each workflow's comment must say
+  // which route applies, so they are tied here to the job structure.
+  it("break-glass routing in the README and comments matches each wp job's environment", () => {
+    const readme = readRepoFile(README_PATH);
+    const bullet = (marker: string): string => {
+      const line = readme.split("\n").find((text) => text.includes(marker));
+      expect(line, marker).toBeDefined();
+      return line as string;
+    };
+    const environmentBullet = bullet("environment secret named `WP_ENTITLEMENT`");
+    const repositoryBullet = bullet("short-lived repository secret");
+    expect(environmentBullet).toInclude("forces break-glass on every run");
+    expect(repositoryBullet).toInclude("cannot declare one");
+    expect(repositoryBullet).toInclude("wp_entitlement: ${{ secrets.WP_ENTITLEMENT }}");
+    expect(readme).toInclude("pass the secret explicitly rather than through `secrets: inherit`");
+
+    for (const path of SETUP_WP_WORKFLOWS) {
+      const wpJobs = Object.values(asRecord(dig(loadYaml(path), "jobs"), "jobs")).filter((job) =>
+        stepsOf(job).some((step) => {
+          const uses = usesOfStep(step);
+          return uses !== undefined && isSetupWpUses(uses);
+        }),
+      );
+      expect(wpJobs.length, path).toBe(1);
+      const bindsEnvironment = dig(wpJobs[0], "environment") !== undefined;
+      const file = `\`${path.split("/").pop()}\``;
+      expect(environmentBullet.includes(file), `${path} in the environment bullet`).toBe(
+        bindsEnvironment,
+      );
+      expect(repositoryBullet.includes(file), `${path} in the repository-secret bullet`).toBe(
+        !bindsEnvironment,
+      );
+      const source = readRepoFile(path);
+      expect(source.includes("WP_ENTITLEMENT in that environment"), path).toBe(bindsEnvironment);
+      expect(source.includes("an environment secret never reaches it"), path).toBe(
+        !bindsEnvironment,
+      );
+    }
+  });
+
+  it("the README documents the caller surface and the migration at the new pin", () => {
+    const readme = readRepoFile(README_PATH);
+    expect(readme).toInclude(`\`${WP_VERSION_INPUT}\``);
+    expect(readme).toInclude(`\`${WP_ENTITLEMENT_SECRET}\``);
+    expect(readme).toInclude(`defaults to \`${setupWpVersionDefault()}\``);
+    expect(readme).toInclude("refuses the run at startup");
+    expect(readme).toInclude("`secrets: inherit`");
+    // Moving the pin moves the installed wp even for a caller that sets
+    // nothing, and the default itself moves before its release is deleted.
+    expect(readme).toInclude(
+      "moving the pin changes the installed wp even when a caller sets nothing",
+    );
+    expect(readme).toInclude(`the \`${setupWpVersionDefault()}\` default is temporary`);
+    expect(readme).toInclude("before the deletion");
+  });
+
+  it("the release and security jobs grant id-token: write for wp sign-in", () => {
+    expect(dig(loadYaml(WORKFLOW_RELEASE), "jobs", "release", "permissions", "id-token")).toBe(
+      "write",
+    );
+    expect(dig(loadYaml(WORKFLOW_SECURITY), "jobs", "security", "permissions", "id-token")).toBe(
+      "write",
+    );
   });
 });
 
@@ -511,50 +792,29 @@ describe("repo-wide pin and prose contracts", () => {
 });
 
 describe("toolchain exceptions", () => {
-  it("webpresso-freshness.yml is a deliberate toolchain exception", () => {
-    expect(Bun.file(WORKFLOW_WEBPRESSO_FRESHNESS).size, `expected ${WORKFLOW_WEBPRESSO_FRESHNESS} to exist`).toBeGreaterThan(0);
-    const workflow = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
-    const on = onSection(workflow);
-    expect(Object.keys(on), "must be callable as a reusable workflow").toContain("workflow_call");
-    expect(Object.keys(on), "must be manually exercisable without waiting for a schedule").toContain(
-      "workflow_dispatch",
-    );
-
-    const job = dig(workflow, "jobs", "freshness");
-    expect(job, "expected a `freshness` job").toBeDefined();
-    expect(dig(job, "permissions", "contents")).toBe("write");
-    expect(dig(job, "permissions", "pull-requests")).toBe("write");
-
-    // Deliberately excluded from the shared-toolchain invariant above: this is
-    // a repo-maintenance automation, not a caller-consuming CI/deploy workflow,
-    // so it does not install pnpm/Vite+/wp.
-    expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
-    expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
-  });
-
-  // The README calls this a *caller*-scheduled workflow. Pin the exact trigger
-  // set so prose and YAML cannot drift into claiming a `schedule:` that does
-  // not exist here (adding one would run the scan against this library instead
-  // of the consumer).
-  it("webpresso-freshness.yml declares exactly workflow_call and workflow_dispatch, never a schedule", () => {
-    const on = onSection(loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS));
-    expect(Object.keys(on).sort()).toStrictEqual(["workflow_call", "workflow_dispatch"]);
-    expect(readRepoFile(README_PATH)).toInclude("caller-scheduled reusable workflow");
-  });
-
   // The gate that makes every other test in this file binding. Without an
   // executor the suite is documentation: a broken contract merges green because
   // nothing ran it. Pin the trigger and the invocation so the gate cannot be
   // silently narrowed or gutted.
   it("self-test.yml gates the contract suite on every pull request", () => {
-    expect(Bun.file(WORKFLOW_SELF_TEST).size, `expected ${WORKFLOW_SELF_TEST} to exist`).toBeGreaterThan(0);
+    expect(
+      Bun.file(WORKFLOW_SELF_TEST).size,
+      `expected ${WORKFLOW_SELF_TEST} to exist`,
+    ).toBeGreaterThan(0);
     const workflow = loadYaml(WORKFLOW_SELF_TEST);
     const on = onSection(workflow);
-    expect(Object.keys(on), "contract suite must gate every pull request").toContain("pull_request");
-    expect(dig(on, "push", "branches"), "main must stay proven after merge").toStrictEqual(["main"]);
+    expect(Object.keys(on), "contract suite must gate every pull request").toContain(
+      "pull_request",
+    );
+    expect(dig(on, "push", "branches"), "main must stay proven after merge").toStrictEqual([
+      "main",
+    ]);
 
     expect(dig(workflow, "permissions", "contents")).toBe("read");
-    expect(dig(workflow, "permissions", "pull-requests"), "read-only gate needs no write scope").toBeUndefined();
+    expect(
+      dig(workflow, "permissions", "pull-requests"),
+      "read-only gate needs no write scope",
+    ).toBeUndefined();
 
     const job = dig(workflow, "jobs", "contract-tests");
     expect(job, "expected a `contract-tests` job").toBeDefined();
@@ -565,9 +825,79 @@ describe("toolchain exceptions", () => {
 
     // Deliberately excluded from the shared-toolchain invariant above: this
     // gate runs the repo's own contract suite and is never called by a
-    // consumer, so it does not install pnpm/Vite+/wp.
+    // consumer, so it does not install pnpm/Vite+. The remote setup-wp pin
+    // appears in the one job that proves it resolves, and nowhere else.
     expect(allUses(workflow)).not.toContain(SETUP_TOOLCHAIN_USES);
-    expect(allUses(workflow)).not.toContain(SETUP_WP_USES);
+    for (const [name, otherJob] of Object.entries(asRecord(dig(workflow, "jobs"), "jobs"))) {
+      if (name !== SETUP_WP_REMOTE_PIN_JOB) {
+        expect(allUses(otherJob), name).not.toContain(SETUP_WP_USES);
+      }
+    }
+  });
+
+  // The sign-in step's branches are proven against a stub wp in
+  // setup-wp-auth.test.ts. This job proves the one branch a stub cannot: the
+  // in-repo action installs a real published pre-login release with auth auto
+  // and NO id-token, and leaves the job signed out and unchanged.
+  it("self-test.yml proves the setup-wp sign-in skip path live without an id-token", () => {
+    const workflow = loadYaml(WORKFLOW_SELF_TEST);
+    expect(dig(workflow, "permissions", "id-token")).toBeUndefined();
+
+    const job = dig(workflow, "jobs", "setup-wp-live-skip");
+    expect(job, "expected a `setup-wp-live-skip` job").toBeDefined();
+    expect(dig(job, "needs")).toBe("contract-tests");
+    expect(dig(job, "permissions")).toStrictEqual({ contents: "read" });
+
+    const steps = stepsOf(job);
+    const checkout = steps.find((step) => String(step["uses"]).startsWith("actions/checkout@"));
+    expect(dig(checkout, "with", "persist-credentials")).toBe(false);
+    const setup = steps.find((step) => step["uses"] === "./.github/actions/setup-wp");
+    expect(setup, "the job must run the in-repo action").toBeDefined();
+    expect(digString(setup, "with", "version")).toBe("0.0.21");
+    expect(digString(setup, "with", "auth")).toBe("auto");
+    expect(dig(setup, "with", "entitlement")).toBeUndefined();
+
+    const assertion = steps
+      .slice(steps.indexOf(setup as YamlRecord) + 1)
+      .map((step) => step["run"])
+      .join("\n");
+    expect(assertion).toInclude("command -v wp");
+    expect(assertion).toInclude("WP_INSTALL_DIR");
+    expect(assertion).toInclude("WEBPRESSO_HOME");
+  });
+
+  // Reachability and the pinned commit's sign-in floor are properties of the
+  // remote repository, not of this YAML, so they are proven at runtime: this
+  // job resolves the very pin the reusable workflows use and installs 0.0.23
+  // (pre-login, no `wp auth ci`) with auth auto and no id-token. A pin whose
+  // floor is 0.0.23 or lower would demand an id-token there and fail with
+  // exit 17. This binds the job to the workflows' pin so the runtime proof
+  // cannot silently stop covering it.
+  it("self-test.yml resolves the reusable workflows' setup-wp pin and proves its 0.0.24 floor", () => {
+    const workflow = loadYaml(WORKFLOW_SELF_TEST);
+    const job = dig(workflow, "jobs", SETUP_WP_REMOTE_PIN_JOB);
+    expect(job, `expected a \`${SETUP_WP_REMOTE_PIN_JOB}\` job`).toBeDefined();
+    expect(dig(job, "needs")).toBe("contract-tests");
+    expect(dig(job, "permissions")).toStrictEqual({ contents: "read" });
+
+    const steps = stepsOf(job);
+    expect(
+      steps.some((step) => String(step["uses"]).startsWith("actions/checkout@")),
+      "the remote form needs no checkout",
+    ).toBe(false);
+    const setup = steps.find((step) => step["uses"] === SETUP_WP_USES);
+    expect(setup, "the job must run the reusable workflows' exact setup-wp pin").toBeDefined();
+    expect(String(dig(setup, "with", "version"))).toBe("0.0.23");
+    expect(digString(setup, "with", "auth")).toBe("auto");
+    expect(dig(setup, "with", "entitlement")).toBeUndefined();
+
+    const assertion = steps
+      .slice(steps.indexOf(setup as YamlRecord) + 1)
+      .map((step) => step["run"])
+      .join("\n");
+    expect(assertion).toInclude("command -v wp");
+    expect(assertion).toInclude("WP_INSTALL_DIR");
+    expect(assertion).toInclude("${RUNNER_TEMP}/webpresso/auth/entitlement.jwt");
   });
 
   it("self-test.yml qualifies manifest/catalog resolution and a fresh-runner setup-wp cache hit", () => {

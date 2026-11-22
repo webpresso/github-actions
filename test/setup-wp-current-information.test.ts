@@ -4,7 +4,6 @@ import {
   ACTION_SETUP_WP,
   ACTION_TOOLCHAIN,
   README_PATH,
-  WORKFLOW_WEBPRESSO_FRESHNESS,
   asRecord,
   dig,
   digString,
@@ -12,16 +11,14 @@ import {
   readRepoFile,
 } from "./helpers.ts";
 
-const FRESHNESS_SHA256 = "3ca9d1652f61900048af4628de555a557f326fda34023e3c13a6639275d78ff2";
-const SETUP_WP_ACTION_BEHAVIOR_SHA256 = "04e8d5569bec90f93e58f041e7cb8d387c8888434ad50bfbd6a579e51b49bf57";
-const ACTION_BEHAVIOR_SHA256 = "49a8edf41c6a9992244340c54e9e4dca67862bdf150c0dfaf6dfa34f49daa0a2";
+const SETUP_WP_ACTION_BEHAVIOR_SHA256 =
+  "68b46bd398dfcc0cff005eb5bbc22d095070e235a9c8e50071f57564dc302b91";
+const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
 const actionText = readRepoFile(ACTION_SETUP_WP);
-const freshnessText = readRepoFile(WORKFLOW_WEBPRESSO_FRESHNESS);
 const action = loadYaml(ACTION_SETUP_WP);
 const toolchainAction = loadYaml(ACTION_TOOLCHAIN);
-const freshness = loadYaml(WORKFLOW_WEBPRESSO_FRESHNESS);
 const inputs = asRecord(dig(action, "inputs"), "setup-wp inputs");
 const steps = (() => {
   const value = dig(action, "runs", "steps");
@@ -29,9 +26,12 @@ const steps = (() => {
   return value.map((step, index) => asRecord(step, `setup-wp runs.steps[${index}]`));
 })();
 const installScript = digString(steps[0], "run") ?? "";
-const packageRootScript = digString(steps[1], "run") ?? "";
-const wpSection = readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ?? "";
-const freshnessSection = readme.split("## webpresso freshness")[1] ?? "";
+// The package-root phase of the single install step: everything from the
+// extraction of package-root/ onward.
+const packageRootScript = installScript.slice(installScript.indexOf('package_root="'));
+const wpSection =
+  readme.split("wp install contract (`setup-wp`):")[1]?.split("## Gating on test outcomes")[0] ??
+  "";
 
 function withoutDescriptions(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutDescriptions);
@@ -51,52 +51,65 @@ describe("setup-wp current information", () => {
     expect(actionText).toInclude("no token");
 
     expect(wpSection).toInclude("public `webpresso/app-releases`");
-    expect(wpSection).toMatch(/exact (?:caller-pinned )?product semver.*independent of the pinned action SHA/iu);
-    expect(wpSection).not.toMatch(/github-token|GITHUB_TOKEN|private source monorepo|api\.github\.com/iu);
+    expect(wpSection).toMatch(
+      /exact (?:caller-pinned )?product semver.*independent of the pinned action SHA/iu,
+    );
+    expect(wpSection).not.toMatch(
+      /github-token|GITHUB_TOKEN|private source monorepo|api\.github\.com/iu,
+    );
   });
 
   it("M2 documents the complete action-supported assets and same-release package root", () => {
-    const binaryAssets = [...installScript.matchAll(/asset="(wp-(?:linux|darwin)-(?:x64|arm64))"/gu)]
+    const targets = [...installScript.matchAll(/target="((?:linux|darwin)-(?:x64|arm64))"/gu)]
       .map((match) => match[1])
-      .filter((asset): asset is string => asset !== undefined)
+      .filter((target): target is string => target !== undefined)
       .sort();
-    expect(binaryAssets).toStrictEqual([
-      "wp-darwin-arm64",
-      "wp-darwin-x64",
-      "wp-linux-arm64",
-      "wp-linux-x64",
-    ]);
-    const packageRootAsset = digString(steps[1], "env", "PACKAGE_ROOT_ASSET");
-    expect(packageRootAsset).toBe("wp-package-root.tgz");
+    expect(targets).toStrictEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
 
-    for (const asset of [...binaryAssets, packageRootAsset]) {
-      expect(wpSection).toInclude(asset ?? "missing package-root asset");
+    for (const target of targets) {
+      expect(wpSection).toInclude(`wp-${target}.tar.gz`);
     }
+    expect(wpSection).toInclude(".tar.gz.json");
+    expect(wpSection).toInclude("package-root/");
     expect(wpSection).toMatch(/same release.*same version/iu);
-    expect(wpSection).not.toMatch(/source[- ]archive|\/tarball\/|private source monorepo|package-root-ref|token fallback/iu);
+    expect(wpSection).not.toMatch(
+      /source[- ]archive|\/tarball\/|private source monorepo|package-root-ref|token fallback/iu,
+    );
   });
 
   it("M3 documents cache-hit, download-miss, checksum, and best-effort seed ordering", () => {
-    expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(installScript.indexOf("curl -fsSL"));
-    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(installScript.indexOf("WP_CHECKSUM"));
+    expect(installScript.indexOf("RUNNER_TOOL_CACHE")).toBeLessThan(
+      installScript.indexOf("curl -fsSL"),
+    );
+    expect(installScript.indexOf("curl -fsSL")).toBeLessThan(
+      installScript.indexOf('sha256_of "${install_dir}/wp"'),
+    );
     expect(installScript).toInclude("Best effort");
 
-    expect(wpSection).toMatch(/cache hit.*skips? (?:both )?(?:the )?download.*checksum/isu);
+    // A hit is verified against the caller checksum, else the seeded digest
+    // record; with neither it is a miss. The record is seeded only after the
+    // binary is in place, so a failed seed never leaves a stale record.
+    expect(installScript).toInclude('"${cache_root}/wp.sha256"');
+    expect(installScript.indexOf('mv "${cache_root}/wp.tmp"')).toBeLessThan(
+      installScript.indexOf('mv "${cache_root}/wp.sha256.tmp"'),
+    );
+    expect(wpSection).toMatch(/cache hit.*`checksum`.*`wp\.sha256`/isu);
+    expect(wpSection).toMatch(/neither.*treated as a (?:cache )?miss/isu);
+    expect(wpSection).toMatch(/verified cache hit skips the download/isu);
+    expect(wpSection).toMatch(/only independent trust root/isu);
     expect(wpSection).toMatch(/cache miss.*direct release-asset URL/isu);
     expect(wpSection).toMatch(/caller-supplied.*sha256/isu);
     expect(wpSection).toMatch(/best-effort.*seed/isu);
-    expect(wpSection).not.toMatch(/actions\/cache|cache store|cache restore|automatic provenance|mandatory checksum/iu);
+    expect(wpSection).not.toMatch(
+      /actions\/cache|cache store|cache restore|automatic provenance|mandatory checksum/iu,
+    );
   });
 
   it("M4 documents current exports and fail-closed catalog behavior", () => {
     const exports = [...packageRootScript.matchAll(/echo "([A-Z_]+)=/gu)]
       .map((match) => match[1])
       .filter((name): name is string => name !== undefined);
-    expect(exports).toStrictEqual([
-      "WEBPRESSO_PACKAGE_ROOT",
-      "WEBPRESSO_AGENT_KIT_ROOT",
-      "NODE_PATH",
-    ]);
+    expect(exports).toStrictEqual(["WEBPRESSO_PACKAGE_ROOT", "NODE_PATH"]);
     expect(packageRootScript).toMatch(/catalog[\s\S]{0,200}exit 12/u);
 
     const packageRootDescription = digString(inputs["package-root"], "description") ?? "";
@@ -106,8 +119,10 @@ describe("setup-wp current information", () => {
     }
     expect(wpSection).toInclude("fails closed");
     expect(packageRootDescription).toInclude("fails closed");
-    expect(wpSection).not.toInclude("WP_AGENT_KIT_PACKAGE_ROOT");
-    expect(packageRootDescription).not.toInclude("WP_AGENT_KIT_PACKAGE_ROOT");
+    for (const retired of ["WEBPRESSO_AGENT_KIT_ROOT", "WP_AGENT_KIT_PACKAGE_ROOT"]) {
+      expect(wpSection).not.toInclude(retired);
+      expect(packageRootDescription).not.toInclude(retired);
+    }
   });
 
   it("M5 documents exact caller selection and no self-update", () => {
@@ -119,31 +134,69 @@ describe("setup-wp current information", () => {
     expect(wpSection).not.toMatch(/setup-wp[^\n]*(?:range|dist-tag)|self-update fallback/iu);
   });
 
-  it("M6 documents the current three-shape freshness migration workflow", () => {
-    expect(digString(freshness, "name")).toBe("Reusable webpresso freshness");
-    expect(Object.keys(asRecord(dig(freshness, "jobs"), "freshness jobs"))).toStrictEqual(["freshness"]);
-    expect(digString(freshness, "jobs", "freshness", "name")).toBe("webpresso-freshness");
-    expect(freshnessText).toInclude("ENV_RE");
-    expect(freshnessText).toInclude("SHELL_DEFAULT_RE");
-    expect(freshnessText).toInclude("COMPOSITE_KEY_RE");
+  it("M6 documents the sign-in contract the action implements", () => {
+    const signInScript = digString(steps[1], "run") ?? "";
+    // Exit statements only (one per line), not prose such as "exit 77" in a warning.
+    const exitCodes = [
+      ...new Set([...signInScript.matchAll(/^\s*exit (\d+)\s*$/gmu)].map((match) => match[1])),
+    ]
+      .filter((code): code is string => code !== undefined && code !== "0")
+      .sort();
+    expect(exitCodes).toStrictEqual(["17", "18", "19", "20", "21"]);
+    for (const code of exitCodes) {
+      expect(wpSection, `README names exit ${code}`).toInclude(`exit ${code}`);
+    }
 
-    expect(readme).toInclude(".github/workflows/webpresso-freshness.yml");
-    expect(freshnessSection).toInclude("Reusable webpresso freshness");
-    expect(freshnessSection).toInclude("webpresso-freshness");
-    expect(freshnessSection).toMatch(/exactly three npm pin shapes/iu);
-    expect(freshnessSection).toMatch(/setup-wp.*excluded/isu);
-    expect(freshnessSection).toMatch(/migration debt.*not an installer\s+or updater/isu);
-    expect(readme).not.toInclude("agent-kit-freshness.yml");
-    expect(freshnessSection).not.toMatch(/four known pin shapes/iu);
+    const floor = /login_floor="([0-9.]+)"/u.exec(signInScript)?.[1];
+    expect(floor).toBe("0.0.24");
+    expect(wpSection).toInclude(`\`${floor}\``);
+
+    const authDescription = digString(inputs["auth"], "description") ?? "";
+    for (const mode of ["auto", "oidc", "none"]) {
+      expect(authDescription).toInclude(mode);
+      expect(wpSection).toInclude(`\`${mode}\``);
+    }
+    expect(authDescription).toInclude("0.0.24");
+    expect(digString(inputs["entitlement"], "description") ?? "").toMatch(/break-glass/iu);
+
+    for (const term of [
+      "`auth`",
+      "`entitlement`",
+      "`permissions: id-token: write`",
+      "`RUNNER_TEMP`",
+      "`wp auth ci`",
+      "`wp auth import --stdin`",
+      "::add-mask::",
+    ]) {
+      expect(wpSection, term).toInclude(term);
+    }
+    expect(wpSection).toMatch(/fork/iu);
+    expect(wpSection).toMatch(/older .*unchanged|unchanged .*older|below .*no-op/isu);
+
+    // The CI auth directory is wp's own (app lane login-only-apps D7), held as
+    // one constant; setup-wp no longer chooses or exports a WEBPRESSO_HOME.
+    const authDir = /auth_dir="\$\{RUNNER_TEMP\}\/([a-z/]+)"/u.exec(signInScript)?.[1];
+    expect(authDir).toBe("webpresso/auth");
+    expect(wpSection).toInclude(`\`\${RUNNER_TEMP}/${authDir}\``);
+    expect(wpSection).not.toInclude("webpresso-home");
+    expect(digString(inputs["auth"], "description") ?? "").not.toInclude("WEBPRESSO_HOME");
+    // Honest compatibility, masking and actor boundaries.
+    expect(wpSection).toInclude("`0.0.16`");
+    expect(wpSection).toMatch(/dependabot/iu);
+    expect(wpSection).toInclude("`secrets.*`");
+    expect(wpSection).not.toMatch(/only the kind and the expiry are printed/iu);
   });
 
-  it("action and freshness behavior boundary", () => {
-    expect(createHash("sha256").update(freshnessText).digest("hex")).toBe(FRESHNESS_SHA256);
+  it("action behavior boundary", () => {
     expect(
-      createHash("sha256").update(JSON.stringify(withoutDescriptions(action))).digest("hex"),
+      createHash("sha256")
+        .update(JSON.stringify(withoutDescriptions(action)))
+        .digest("hex"),
     ).toBe(SETUP_WP_ACTION_BEHAVIOR_SHA256);
     expect(
-      createHash("sha256").update(JSON.stringify(withoutDescriptions(toolchainAction))).digest("hex"),
+      createHash("sha256")
+        .update(JSON.stringify(withoutDescriptions(toolchainAction)))
+        .digest("hex"),
     ).toBe(ACTION_BEHAVIOR_SHA256);
   });
 });

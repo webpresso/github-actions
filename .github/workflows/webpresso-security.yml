@@ -16,16 +16,40 @@ on:
         required: false
         default: ubuntu-latest
         type: string
+      # Optional WITH A DEFAULT, deliberately: a caller moving its pin keeps a
+      # pre-login wp and selects the login-only release (0.0.24 or later) by
+      # this input, so the pin can move before that release exists. Forwarded
+      # verbatim to setup-wp `version`, whose exact-semver check is the only
+      # guard. The default must publish install archives (0.0.16 or later).
+      wp_version:
+        description: "Exact wp release semver installed by setup-wp; 0.0.24 or later is login-only and signs in with the job's GitHub OIDC token"
+        required: false
+        default: "0.0.21"
+        type: string
+    secrets:
+      # Break-glass only, for when api.webpresso.ai cannot exchange the job's
+      # OIDC token. Forwarded to setup-wp `entitlement` and nowhere else, and
+      # only when the caller passes it: the `security` job declares no
+      # `environment:`, and a job that calls a reusable workflow cannot declare
+      # one, so an environment secret never reaches it. Break-glass is a
+      # short-lived repository secret passed explicitly as
+      # `wp_entitlement: ${{ secrets.WP_ENTITLEMENT }}` and deleted afterwards.
+      # Below the login-only floor setup-wp ignores it with a warning, so
+      # passing it (or `secrets: inherit`) is safe before wp_version moves.
+      wp_entitlement:
+        required: false
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  security:
-    name: security
+  # The third-party scanners run in their own job, without `id-token: write`:
+  # that grant is job-wide, so in the wp job they could mint OIDC tokens for
+  # any audience and read the wp CI entitlement.
+  scan:
+    name: scan
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,11 +67,46 @@ jobs:
             --recursive
             ./
 
-      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@27883b9b05dd721c848524dd816cc7c9103276f0
+  security:
+    name: security
+    needs: scan
+    # Runs whatever `scan` concluded, so a failed scan fails this check
+    # instead of skipping it: branch protection counts a skipped required
+    # check as passing. The first step refuses unless `scan` succeeded, so
+    # the caller's commands still run only after both scanners passed.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      packages: read
+      # wp 0.0.24 and later signs in with the job's GitHub OIDC token. The
+      # grant is job-wide (every later step can mint a token and read the
+      # entitlement), so it stays on jobs that run wp only.
+      id-token: write
+    steps:
+      - name: Require the secret and dependency scans
+        if: ${{ needs.scan.result != 'success' }}
+        shell: bash
+        env:
+          SCAN_RESULT: ${{ needs.scan.result }}
+        run: |
+          echo "::error::The scan job (Gitleaks and OSV Scanner) ended '${SCAN_RESULT}'; the caller's security block runs only after both scanners pass."
+          exit 1
 
-      - uses: webpresso/github-actions/.github/actions/setup-wp@2003ca953f336efb779165f748e1ad8408565428
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "0.0.6"
+          fetch-depth: 0
+
+      - uses: webpresso/github-actions/.github/actions/setup-webpresso-toolchain@f9047de30cb95d1f7ca476ec23ef46c93ac6491d
+
+      # `auth` stays setup-wp's default, auto: below the login-only floor
+      # (0.0.24 at the pinned setup-wp) the sign-in step does nothing; at or
+      # above it, it signs wp in for this job with the job's OIDC token, or
+      # with the break-glass entitlement when the caller passed one.
+      - uses: webpresso/github-actions/.github/actions/setup-wp@56134240116afe7a3c6da92245de1adc04b08a64
+        with:
+          version: ${{ inputs.wp_version }}
+          entitlement: ${{ secrets.wp_entitlement }}
 
       - name: Install caller dependencies
         shell: bash

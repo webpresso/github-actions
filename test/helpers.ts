@@ -3,8 +3,7 @@
  *
  * This repository ships reusable workflows and composite actions; the contract
  * suites treat that YAML as data. Everything the suites need to read a
- * workflow, walk its steps, extract an embedded heredoc script, or build a git
- * fixture repository lives here — one implementation, so the extraction and
+ * workflow, walk its steps, or extract an embedded heredoc script lives here — one implementation, so the extraction and
  * pin rules cannot silently diverge between suites the way the previous
  * Ruby + node:test pair did.
  *
@@ -15,10 +14,10 @@
  */
 
 import { Glob } from "bun";
-import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 /** The runtime that GitHub Actions uses for embedded workflow scripts. */
 export const NODE_BIN = "node";
@@ -31,7 +30,6 @@ export const WORKFLOW_PREVIEW = join(WORKFLOWS_DIR, "cloudflare-preview.yml");
 export const WORKFLOW_PRODUCTION = join(WORKFLOWS_DIR, "cloudflare-production.yml");
 export const WORKFLOW_RELEASE = join(WORKFLOWS_DIR, "changesets-release.yml");
 export const WORKFLOW_SECURITY = join(WORKFLOWS_DIR, "webpresso-security.yml");
-export const WORKFLOW_WEBPRESSO_FRESHNESS = join(WORKFLOWS_DIR, "webpresso-freshness.yml");
 export const WORKFLOW_SELF_TEST = join(WORKFLOWS_DIR, "self-test.yml");
 export const ACTION_TOOLCHAIN = join(ACTIONS_DIR, "setup-webpresso-toolchain", "action.yml");
 export const ACTION_SETUP_WP = join(ACTIONS_DIR, "setup-wp", "action.yml");
@@ -65,24 +63,16 @@ export const JOB_TIMEOUT_WORKFLOWS: ReadonlyArray<readonly [string, string]> = [
  * the suite still proves every site agrees.
  */
 export const WAIT_FOR_CHECKS_USES_RE = /\/wait-for-checks@/u;
-export const REMOTE_WAIT_FOR_CHECKS_PREFIX = "webpresso/github-actions/.github/actions/wait-for-checks@";
+export const REMOTE_WAIT_FOR_CHECKS_PREFIX =
+  "webpresso/github-actions/.github/actions/wait-for-checks@";
 
 /**
- * webpresso-freshness.yml is not a caller-consuming CI/deploy workflow: it is a
- * repo-maintenance automation (npm registry lookup + git + gh CLI) that keeps
- * other workflows' agent-kit pins fresh. It deliberately does not install
- * pnpm/Vite+/wp -- pulling in the shared toolchain for it would be pure scope
- * creep. Its own contract lives in `freshness.test.ts`.
- *
  * self-test.yml is this repository's own CI gate: it runs the contract suite
  * against the repo itself and is never called by a consumer. Installing the
  * shared toolchain for a Bun test run would be pure scope creep too. Its own
  * contract is `self-test.yml gates the contract suite`.
  */
-export const NON_TOOLCHAIN_WORKFLOWS: readonly string[] = [
-  WORKFLOW_WEBPRESSO_FRESHNESS,
-  WORKFLOW_SELF_TEST,
-];
+export const NON_TOOLCHAIN_WORKFLOWS: readonly string[] = [WORKFLOW_SELF_TEST];
 
 /* -------------------------------------------------------------------------- */
 /* YAML access                                                                 */
@@ -141,7 +131,10 @@ export function dig(node: YamlNode | undefined, ...keys: readonly string[]): Yam
   return current;
 }
 
-export function digString(node: YamlNode | undefined, ...keys: readonly string[]): string | undefined {
+export function digString(
+  node: YamlNode | undefined,
+  ...keys: readonly string[]
+): string | undefined {
   const value = dig(node, ...keys);
   return typeof value === "string" ? value : undefined;
 }
@@ -191,7 +184,9 @@ export function allStepsAnywhere(node: YamlNode | undefined): readonly YamlRecor
 }
 
 export function extractUses(steps: readonly YamlRecord[]): readonly string[] {
-  return steps.map((step) => step["uses"]).filter((value): value is string => typeof value === "string");
+  return steps
+    .map((step) => step["uses"])
+    .filter((value): value is string => typeof value === "string");
 }
 
 /** Every `uses:` value anywhere in a workflow or composite action document. */
@@ -239,13 +234,13 @@ const SETUP_WP_USES_RE = /\/setup-wp@/u;
 
 /**
  * The pins live at many irreducible YAML sites. Asserting a literal here would
- * make the test file one more site that every freshness bump has to edit, so
+ * make the test file one more site that every pin bump has to edit, so
  * the expected value is derived from a single canonical workflow at runtime and
  * the suites assert cross-site consistency plus value shape instead.
  *
  * The anchor was `webpresso-ci.yml` until that workflow was removed for having
  * zero consumers across the org. Any workflow carrying exactly one toolchain
- * pin, one setup-wp pin, and one agent-kit version works; the production deploy
+ * pin, one setup-wp pin, and one wp version works; the production deploy
  * workflow is the most load-bearing survivor, so it is the anchor now.
  */
 export const CANONICAL_PIN_WORKFLOW = WORKFLOW_PRODUCTION;
@@ -253,7 +248,9 @@ export const CANONICAL_PIN_WORKFLOW = WORKFLOW_PRODUCTION;
 function soleMatch(values: readonly string[], pattern: RegExp, label: string): string {
   const unique = [...new Set(values.filter((value) => pattern.test(value)))];
   if (unique.length !== 1) {
-    throw new Error(`expected exactly one distinct ${label} in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`);
+    throw new Error(
+      `expected exactly one distinct ${label} in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`,
+    );
   }
   return unique[0] as string;
 }
@@ -262,23 +259,52 @@ const canonicalWorkflow = loadYaml(CANONICAL_PIN_WORKFLOW);
 const canonicalUses = allUses(canonicalWorkflow);
 
 /** `webpresso/github-actions/.github/actions/setup-webpresso-toolchain@<sha>` */
-export const SETUP_TOOLCHAIN_USES: string = soleMatch(canonicalUses, TOOLCHAIN_USES_RE, "toolchain pin");
+export const SETUP_TOOLCHAIN_USES: string = soleMatch(
+  canonicalUses,
+  TOOLCHAIN_USES_RE,
+  "toolchain pin",
+);
 
 /** `webpresso/github-actions/.github/actions/setup-wp@<sha>` */
 export const SETUP_WP_USES: string = soleMatch(canonicalUses, SETUP_WP_USES_RE, "setup-wp pin");
 
-/** The exact `@webpresso/agent-kit` semver every `setup-wp` step installs. */
-export const SETUP_WP_VERSION: string = (() => {
-  const versions = allSteps(canonicalWorkflow)
-    .filter((step) => step["uses"] === SETUP_WP_USES)
-    .map((step) => digString(step, "with", "version"))
-    .filter((value): value is string => typeof value === "string");
-  const unique = [...new Set(versions)];
-  if (unique.length !== 1) {
-    throw new Error(`expected exactly one distinct setup-wp version in ${CANONICAL_PIN_WORKFLOW}, got ${unique.length}`);
+/**
+ * The four caller-facing reusable workflows that install wp through
+ * `setup-wp`. Each exposes the same caller surface: the `wp_version` input and
+ * the `wp_entitlement` secret.
+ */
+export const SETUP_WP_WORKFLOWS: readonly string[] = [
+  WORKFLOW_PREVIEW,
+  WORKFLOW_PRODUCTION,
+  WORKFLOW_RELEASE,
+  WORKFLOW_SECURITY,
+];
+
+/** The workflow_call input a caller sets to choose the wp release. */
+export const WP_VERSION_INPUT = "wp_version";
+/** The optional workflow_call secret forwarded to setup-wp's break-glass `entitlement`. */
+export const WP_ENTITLEMENT_SECRET = "wp_entitlement";
+/** The exact `with.version` of every reusable-workflow setup-wp step. */
+export const SETUP_WP_VERSION_EXPRESSION = `\${{ inputs.${WP_VERSION_INPUT} }}`;
+/** The exact `with.entitlement` of every reusable-workflow setup-wp step. */
+export const SETUP_WP_ENTITLEMENT_EXPRESSION = `\${{ secrets.${WP_ENTITLEMENT_SECRET} }}`;
+
+/**
+ * The exact wp release semver a caller gets when it does not set
+ * `wp_version`: the default of that input in the canonical workflow. The
+ * suites assert every other workflow declares the same default. A function,
+ * not a module constant: a missing input fails the assertions that read it,
+ * not the load of every suite that imports this module.
+ */
+export function setupWpVersionDefault(): string {
+  const value = dig(workflowCallInputs(canonicalWorkflow), WP_VERSION_INPUT, "default");
+  if (typeof value !== "string") {
+    throw new Error(
+      `expected a string default for workflow_call input ${WP_VERSION_INPUT} in ${CANONICAL_PIN_WORKFLOW}`,
+    );
   }
-  return unique[0] as string;
-})();
+  return value;
+}
 
 export function isToolchainUses(value: string): boolean {
   return TOOLCHAIN_USES_RE.test(value);
@@ -315,18 +341,6 @@ export function extractHeredocs(text: string): readonly EmbeddedHeredoc[] {
   return matches.map((match) => ({ opener: match[1] ?? "", body: match[2] ?? "" }));
 }
 
-/**
- * Strip every embedded NODE heredoc (delimiters + body) so YAML-only analysis
- * cannot be confused by JS source that mentions the string `uses:`.
- * Must be global: replacing only the first body would leave later heredocs in
- * place and could miss real YAML `uses:` lines that follow them.
- */
-export function stripHeredocs(text: string): string {
-  return text.replace(new RegExp(HEREDOC_PATTERN, "gmu"), "");
-}
-
-export const YAML_USES_LINE_RE = /^\s*-\s*uses:\s*(\S+)/gmu;
-
 /* -------------------------------------------------------------------------- */
 /* Executing extracted scripts                                                 */
 /* -------------------------------------------------------------------------- */
@@ -341,56 +355,4 @@ export function nodeSyntaxCheck(source: string): SpawnSyncReturns<string> {
   const scriptPath = join(dir, "script.cjs");
   writeFileSync(scriptPath, source);
   return spawnSync(NODE_BIN, ["--check", scriptPath], { encoding: "utf8" });
-}
-
-export function writeFixtureFile(dir: string, relPath: string, contents: string): void {
-  const filePath = join(dir, relPath);
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, contents);
-}
-
-/** Build a real committed git repository so `git ls-files` based scans see it. */
-export function initFixtureRepo(files: Readonly<Record<string, string>>): string {
-  const dir = makeTempDir("webpresso-freshness-fixture-");
-  for (const [relPath, contents] of Object.entries(files)) {
-    writeFixtureFile(dir, relPath, contents);
-  }
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
-  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
-  execFileSync("git", ["add", "-A"], { cwd: dir });
-  execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
-  return dir;
-}
-
-export type ScanScriptRun = {
-  readonly result: SpawnSyncReturns<string>;
-  readonly githubOutput: string;
-  readonly prBodyFile: string;
-};
-
-/** Run an extracted scan script under `node` against a fixture repository. */
-export function runScanScript(options: {
-  readonly latest: string;
-  readonly cwd: string;
-  readonly scriptSource: string;
-}): ScanScriptRun {
-  const scriptPath = join(options.cwd, "__scan.cjs");
-  writeFileSync(scriptPath, options.scriptSource);
-  const githubOutput = join(options.cwd, "__github_output.txt");
-  const prBodyFile = join(options.cwd, "__pr_body.md");
-  writeFileSync(githubOutput, "");
-
-  const result = spawnSync(NODE_BIN, [scriptPath], {
-    cwd: options.cwd,
-    env: {
-      ...process.env,
-      LATEST_VERSION: options.latest,
-      GITHUB_OUTPUT: githubOutput,
-      PR_BODY_FILE: prBodyFile,
-    },
-    encoding: "utf8",
-  });
-
-  return { result, githubOutput, prBodyFile };
 }
