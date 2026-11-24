@@ -212,6 +212,13 @@ jobs:
             echo "::error::partial fixture is unexpectedly executable"
             exit 1
           fi
+          # Simulate a Kubernetes/ARC runner where ~/.local/share is 0775 (group-writable):
+          # setup-wp must provision a private 0700 WP_STATE_ROOT under sticky /tmp so
+          # compiled wp's TS7 worker does not panic on a non-sticky writable ancestor.
+          xdg_dir="${RUNNER_TEMP}/xdg-data-0775"
+          mkdir -p "${xdg_dir}"
+          chmod 0775 "${xdg_dir}"
+          echo "XDG_DATA_HOME=${xdg_dir}" >> "${GITHUB_ENV}"
 
       - uses: ./.github/actions/setup-wp
         with:
@@ -244,7 +251,12 @@ jobs:
           "${expected}" --help >/dev/null
 
           # Prove compiled wp resolves its sibling runtime assets (TS7 worker +
-          # package-root) end-to-end against a real vite.config.ts#fmt fixture.
+          # package-root) end-to-end against a real vite.config.ts#fmt fixture,
+          # including under the simulated 0775 XDG_DATA_HOME via private WP_STATE_ROOT.
+          if [[ -z "${WP_STATE_ROOT:-}" || ! -d "${WP_STATE_ROOT}" ]]; then
+            echo "::error::setup-wp did not provision private WP_STATE_ROOT for 0775 XDG_DATA_HOME"
+            exit 1
+          fi
           smoke="${RUNNER_TEMP}/wp-compiled-smoke"
           rm -rf "${smoke}"
           mkdir -p "${smoke}/repo" "${smoke}/stub-bin"

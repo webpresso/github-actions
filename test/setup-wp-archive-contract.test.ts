@@ -261,6 +261,8 @@ type RunOptions = FixtureOptions & {
   readonly cachedTreeBin?: string;
   /** Pre-seed a `wp.sha256` digest record next to the cached binary. */
   readonly cachedRecord?: string;
+  /** Extra environment variables passed to the install step (e.g. XDG_DATA_HOME, WP_STATE_ROOT). */
+  readonly extraEnv?: Readonly<Record<string, string>>;
 };
 
 function runAction(options: RunOptions) {
@@ -309,6 +311,7 @@ function runAction(options: RunOptions) {
       WP_RELEASE_REPO: RELEASE_REPO,
       WP_CHECKSUM: options.checksum ?? "",
       WP_PACKAGE_ROOT: options.packageRoot === true ? "true" : "false",
+      ...(options.extraEnv ?? {}),
     },
   });
   return {
@@ -734,6 +737,58 @@ describe("setup-wp install archive contract", () => {
       expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(
         sha256(FIXTURE_BIN),
       );
+    });
+  });
+
+  describe("private WP_STATE_ROOT provisioning on writable-ancestor hosts", () => {
+    const CACHED_BIN = "#!/bin/sh\necho cached wp\n";
+
+    it("provisions a 0700 WP_STATE_ROOT under /tmp when XDG_DATA_HOME has a 0775 ancestor (fresh install and cache hit)", () => {
+      const xdg = makeTempDir("setup-wp-xdg-0775-");
+      chmodSync(xdg, 0o775);
+
+      for (const extra of [
+        {},
+        { cachedTreeBin: CACHED_BIN, cachedRecord: `${sha256(CACHED_BIN)}\n` },
+      ] as const) {
+        const run = runAction({
+          target: "linux-x64",
+          ...extra,
+          extraEnv: { XDG_DATA_HOME: xdg },
+        });
+        expect(run.result.status, run.output).toBe(0);
+        const match = /^WP_STATE_ROOT=(.+)$/mu.exec(run.githubEnv);
+        expect(match, run.githubEnv).not.toBeNull();
+        const stateRoot = match![1]!;
+        expect(stateRoot.startsWith("/tmp/webpresso-state.")).toBe(true);
+        expect(lstatSync(stateRoot).mode & 0o777).toBe(0o700);
+      }
+    });
+
+    it("preserves an explicit caller WP_STATE_ROOT without overriding it", () => {
+      const xdg = makeTempDir("setup-wp-xdg-0775-");
+      chmodSync(xdg, 0o775);
+      const run = runAction({
+        target: "linux-x64",
+        cachedTreeBin: CACHED_BIN,
+        cachedRecord: `${sha256(CACHED_BIN)}\n`,
+        extraEnv: { XDG_DATA_HOME: xdg, WP_STATE_ROOT: "/tmp/caller-owned-state" },
+      });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.githubEnv).not.toInclude("WP_STATE_ROOT=");
+    });
+
+    it("does not export WP_STATE_ROOT when the default state root ancestors are already private", () => {
+      const xdg = makeTempDir("setup-wp-xdg-0700-");
+      chmodSync(xdg, 0o700);
+      const run = runAction({
+        target: "linux-x64",
+        cachedTreeBin: CACHED_BIN,
+        cachedRecord: `${sha256(CACHED_BIN)}\n`,
+        extraEnv: { XDG_DATA_HOME: xdg },
+      });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.githubEnv).not.toInclude("WP_STATE_ROOT=");
     });
   });
 

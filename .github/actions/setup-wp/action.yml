@@ -125,6 +125,71 @@ runs:
           fi
         }
 
+        # Compiled wp's embedded TypeScript 7 worker materializes its native
+        # runtime under ${WP_STATE_ROOT:-<default-data-dir>}/cache/typescript7
+        # and refuses any non-sticky group/world-writable ancestor (0022 without
+        # 1000). On Kubernetes/ARC runners or umask-0002 hosts (for example
+        # after setup-vp creates ~/.local/share at 0775), the default data root
+        # violates that invariant. When WP_STATE_ROOT is unset and any existing
+        # ancestor of the default state root is non-sticky group/world-writable
+        # (or missing ancestors would be created under a permissive umask),
+        # provision a job-private 0700 directory directly under sticky /tmp.
+        dir_mode_octal() {
+          if stat -c '%a' "$1" >/dev/null 2>&1; then
+            stat -c '%a' "$1"
+          else
+            stat -f '%Lp' "$1"
+          fi
+        }
+
+        ensure_safe_state_root() {
+          if [[ -n "${WP_STATE_ROOT:-}" ]]; then
+            return 0
+          fi
+          if [[ -z "${HOME:-}" && -z "${XDG_DATA_HOME:-}" ]]; then
+            return 0
+          fi
+          local default_parent=""
+          if [[ "${os}" == "Darwin" ]]; then
+            default_parent="${HOME:-}/Library/Application Support"
+          else
+            default_parent="${XDG_DATA_HOME:-${HOME:-}/.local/share}"
+          fi
+          local unsafe=false
+          local probe="${default_parent}"
+          local current_umask
+          current_umask="$(umask)"
+          while [[ ! -e "${probe}" && "${probe}" != "/" && "${probe}" != "." ]]; do
+            if (( (8#${current_umask} & 022) != 022 )); then
+              unsafe=true
+              break
+            fi
+            probe="$(dirname "${probe}")"
+          done
+          if [[ "${unsafe}" != "true" && -d "${probe}" ]]; then
+            probe="$(cd -P -- "${probe}" && pwd -P)"
+            while true; do
+              local mode
+              mode="$(dir_mode_octal "${probe}" 2>/dev/null || true)"
+              if [[ -n "${mode}" ]] && (( (8#${mode} & 022) != 0 && (8#${mode} & 01000) == 0 )); then
+                unsafe=true
+                break
+              fi
+              if [[ "${probe}" == "/" ]]; then
+                break
+              fi
+              probe="$(dirname "${probe}")"
+            done
+          fi
+          if [[ "${unsafe}" == "true" ]]; then
+            local state_root
+            state_root="$(mktemp -d /tmp/webpresso-state.XXXXXX)"
+            chmod 700 "${state_root}"
+            echo "WP_STATE_ROOT=${state_root}" >> "${GITHUB_ENV}"
+            echo "setup-wp: provisioned private WP_STATE_ROOT=${state_root} (default state root has a non-sticky writable ancestor)"
+          fi
+        }
+
         # Cache short-circuit. Keyed on the tool-cache VERSION DIRECTORY only:
         # `wp --version` reports the product axis from a package root the
         # standalone binary does not have, so every release binary prints
@@ -170,6 +235,7 @@ runs:
             echo "setup-wp: cached wp sha256 verified"
             echo "${cached_dir}" >> "${GITHUB_PATH}"
             echo "WP_INSTALL_DIR=${cached_dir}" >> "${GITHUB_ENV}"
+            ensure_safe_state_root
             if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
               exit 0
             fi
@@ -358,6 +424,7 @@ runs:
 
             echo "${install_dir}" >> "${GITHUB_PATH}"
             echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
+            ensure_safe_state_root
             echo "setup-wp: installed wp ${WP_VERSION} (${archive_name}) to ${install_dir}"
             package_root_src="${install_root}/package-root"
           else
