@@ -492,7 +492,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: webpresso/github-actions/.github/actions/setup-wp@56134240116afe7a3c6da92245de1adc04b08a64
+      - uses: webpresso/github-actions/.github/actions/setup-wp@139e85a4e0119ff24f87e32bbc5f9f8a9e838ea0
         with:
           version: 0.0.23
           auth: auto
