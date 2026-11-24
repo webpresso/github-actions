@@ -1,17 +1,18 @@
 name: Setup global wp
 description: >
-  Put a caller-pinned wp release binary on PATH. Prefers a wp already baked into
-  the runner's @actions/tool-cache layout; otherwise downloads the published
-  install archive wp-<target>.tar.gz (plus its wp-<target>.tar.gz.json digest
-  sidecar) from the PUBLIC webpresso/app-releases repository, verifies the
-  archive sha256 against the sidecar, and extracts bin/wp -- no GitHub API
-  call, no token, no python3. The sidecar digest is NOT an independent trust
-  root (both files come from the same release location): it guards against
-  corruption and partial downloads, not a compromised release repository or a
-  mirror set through release-repo. High-assurance consumers should pin the
-  checksum input. For a login-only wp (see the auth input) a second step then
-  signs wp in with the job's GitHub OIDC token; wp keeps the CI entitlement
-  under RUNNER_TEMP.
+  Put a caller-pinned wp release on PATH. Prefers a verified wp installation
+  already present in the runner's @actions/tool-cache layout; otherwise
+  downloads the published install archive wp-<target>.tar.gz (plus its
+  wp-<target>.tar.gz.json digest sidecar) from the PUBLIC webpresso/app-releases
+  repository, verifies the archive sha256 against the sidecar, and installs the
+  entire verified archive tree atomically (bin/*, manifest.json, package-root/,
+  and any sibling runtime assets) -- no GitHub API call, no token, no python3.
+  The sidecar digest is NOT an independent trust root (both files come from the
+  same release location): it guards against corruption and partial downloads,
+  not a compromised release repository or a mirror set through release-repo.
+  High-assurance consumers should pin the checksum input. For a login-only wp
+  (see the auth input) a second step then signs wp in with the job's GitHub
+  OIDC token; wp keeps the CI entitlement under RUNNER_TEMP.
 
 inputs:
   version:
@@ -67,10 +68,11 @@ inputs:
     default: ""
   package-root:
     description: >
-      Also extract package-root/ from the SAME wp-<target>.tar.gz archive as the
-      binary and export WEBPRESSO_PACKAGE_ROOT and NODE_PATH. Requires no
-      token, no second download and no second version, and fails closed when
-      the extracted root has no catalog/. Requires wp >= 0.0.5.
+      Expose package-root/ from the SAME wp-<target>.tar.gz archive (or from
+      the verified whole-tree tool cache on a hit) and export
+      WEBPRESSO_PACKAGE_ROOT and NODE_PATH. Requires no token, no second
+      download and no second version, and fails closed when the root has no
+      catalog/. Requires wp >= 0.0.5.
     required: false
     default: "false"
 
@@ -139,7 +141,18 @@ runs:
         cache_root="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/wp/${WP_VERSION}/${tool_arch}"
         cache_record="${cache_root}/wp.sha256"
         cache_hit=false
-        if [[ -x "${cache_root}/wp" ]]; then
+        need_download=true
+        package_root_src=""
+        cached_bin=""
+        cached_dir=""
+        if [[ -x "${cache_root}/bin/wp" ]]; then
+          cached_bin="${cache_root}/bin/wp"
+          cached_dir="${cache_root}/bin"
+        elif [[ -x "${cache_root}/wp" ]]; then
+          cached_bin="${cache_root}/wp"
+          cached_dir="${cache_root}"
+        fi
+        if [[ -n "${cached_bin}" ]]; then
           cached_expected="${WP_CHECKSUM}"
           if [[ -z "${cached_expected}" && -f "${cache_record}" ]]; then
             read -r cached_expected _ < "${cache_record}" || true
@@ -147,18 +160,22 @@ runs:
           if [[ -z "${cached_expected}" ]]; then
             echo "setup-wp: cached wp at ${cache_root} has no checksum and no digest record; treating it as a cache miss"
           else
-            cached_actual="$(sha256_of "${cache_root}/wp")"
+            cached_actual="$(sha256_of "${cached_bin}")"
             if [[ "${cached_actual}" != "${cached_expected}" ]]; then
-              echo "::error::sha256 mismatch for cached wp ${cache_root}/wp: expected ${cached_expected}, got ${cached_actual}"
+              echo "::error::sha256 mismatch for cached wp ${cached_bin}: expected ${cached_expected}, got ${cached_actual}"
               exit 16
             fi
             cache_hit=true
             echo "setup-wp: tool-cache hit for wp ${WP_VERSION} (${tool_arch}) at ${cache_root}"
             echo "setup-wp: cached wp sha256 verified"
-            echo "${cache_root}" >> "${GITHUB_PATH}"
-            echo "WP_INSTALL_DIR=${cache_root}" >> "${GITHUB_ENV}"
+            echo "${cached_dir}" >> "${GITHUB_PATH}"
+            echo "WP_INSTALL_DIR=${cached_dir}" >> "${GITHUB_ENV}"
             if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
               exit 0
+            fi
+            if [[ ! -L "${cache_root}/package-root" && -d "${cache_root}/package-root/catalog" ]]; then
+              need_download=false
+              package_root_src="${cache_root}/package-root"
             fi
           fi
         fi
@@ -168,175 +185,210 @@ runs:
           sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$2" | head -n 1
         }
 
-        # ONE contract: a single install archive per target plus a digest
-        # sidecar. Public release assets: plain redirecting downloads, no API
-        # and no token. -L is mandatory -- GitHub 302s release assets to a
-        # signed asset host, and without it curl reports the redirect as a
-        # failure.
         archive_name="wp-${target}.tar.gz"
         sidecar_name="${archive_name}.json"
-        base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"
-        work_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp-archive"
-        rm -rf "${work_dir}"
-        mkdir -p "${work_dir}/stage"
+        work_dir=""
 
-        for name in "${archive_name}" "${sidecar_name}"; do
-          echo "setup-wp: downloading ${base_url}/${name}"
-          if ! curl -fsSL --retry 3 --retry-delay 2 -o "${work_dir}/${name}" "${base_url}/${name}"; then
-            echo "::error::download failed for ${base_url}/${name} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${name}?"
-            exit 6
+        if [[ "${need_download}" == "true" ]]; then
+          # ONE contract: a single install archive per target plus a digest
+          # sidecar. Public release assets: plain redirecting downloads, no API
+          # and no token. -L is mandatory -- GitHub 302s release assets to a
+          # signed asset host, and without it curl reports the redirect as a
+          # failure.
+          base_url="https://github.com/${WP_RELEASE_REPO}/releases/download/v${WP_VERSION}"
+          work_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp-archive"
+          rm -rf "${work_dir}"
+          mkdir -p "${work_dir}/stage"
+
+          for name in "${archive_name}" "${sidecar_name}"; do
+            echo "setup-wp: downloading ${base_url}/${name}"
+            if ! curl -fsSL --retry 3 --retry-delay 2 -o "${work_dir}/${name}" "${base_url}/${name}"; then
+              echo "::error::download failed for ${base_url}/${name} -- does release v${WP_VERSION} of ${WP_RELEASE_REPO} publish ${name}?"
+              exit 6
+            fi
+          done
+
+          sidecar="${work_dir}/${sidecar_name}"
+          for pair in "archive:${archive_name}" "version:${WP_VERSION}" "target:${target}"; do
+            field="${pair%%:*}"
+            want="${pair#*:}"
+            got="$(json_field "${field}" "${sidecar}")"
+            if [[ "${got}" != "${want}" ]]; then
+              echo "::error::sidecar ${sidecar_name} ${field} mismatch: expected '${want}', got '${got}'"
+              exit 7
+            fi
+          done
+
+          expected_sha="$(json_field sha256 "${sidecar}")"
+          actual_sha="$(sha256_of "${work_dir}/${archive_name}")"
+          if [[ -z "${expected_sha}" || "${actual_sha}" != "${expected_sha}" ]]; then
+            echo "::error::sha256 mismatch for ${archive_name}: sidecar says '${expected_sha}', archive is ${actual_sha}"
+            exit 8
           fi
-        done
+          echo "setup-wp: archive sha256 verified against sidecar"
 
-        sidecar="${work_dir}/${sidecar_name}"
-        for pair in "archive:${archive_name}" "version:${WP_VERSION}" "target:${target}"; do
-          field="${pair%%:*}"
-          want="${pair#*:}"
-          got="$(json_field "${field}" "${sidecar}")"
-          if [[ "${got}" != "${want}" ]]; then
-            echo "::error::sidecar ${sidecar_name} ${field} mismatch: expected '${want}', got '${got}'"
-            exit 7
+          # Refuse a hostile archive BEFORE the first extraction writes anything.
+          # The sidecar proves integrity only, so the archive content is still
+          # untrusted: only regular files and directories under relative,
+          # dot-dot-free paths may pass. Two listings (names, then verbose types)
+          # work identically on GNU tar and bsdtar; their line counts must agree
+          # or the listing is ambiguous (e.g. a newline in a name) and is refused.
+          stage="${work_dir}/stage"
+          names_list="${work_dir}/entries.names"
+          kinds_list="${work_dir}/entries.kinds"
+          if ! tar -tzf "${work_dir}/${archive_name}" > "${names_list}" ||
+             ! tar -tzvf "${work_dir}/${archive_name}" > "${kinds_list}"; then
+            echo "::error::${archive_name} cannot be listed; refusing to extract"
+            exit 15
           fi
-        done
+          if [[ "$(wc -l < "${names_list}")" -ne "$(wc -l < "${kinds_list}")" ]]; then
+            echo "::error::${archive_name} has an ambiguous entry listing; refusing to extract"
+            exit 13
+          fi
+          while IFS= read -r entry; do
+            case "${entry}" in
+              /*)
+                echo "::error::${archive_name} has an absolute-path entry '${entry}'; refusing to extract"
+                exit 13
+                ;;
+            esac
+            case "/${entry}/" in
+              */../*)
+                echo "::error::${archive_name} has a path-traversal entry '${entry}'; refusing to extract"
+                exit 13
+                ;;
+            esac
+          done < "${names_list}"
+          while IFS= read -r line; do
+            # bsdtar lists a ustar hardlink that claims data as a regular file
+            # with a trailing "link to <target>"; refuse any link annotation.
+            case "${line}" in
+              *" link to "*|*" -> "*)
+                echo "::error::${archive_name} has a link entry '${line}'; refusing to extract"
+                exit 13
+                ;;
+            esac
+            case "${line:0:1}" in
+              -|d) ;;
+              *)
+                echo "::error::${archive_name} has a non-regular entry (symlink, hardlink, or device) '${line}'; refusing to extract"
+                exit 13
+                ;;
+            esac
+          done < "${kinds_list}"
 
-        expected_sha="$(json_field sha256 "${sidecar}")"
-        actual_sha="$(sha256_of "${work_dir}/${archive_name}")"
-        if [[ -z "${expected_sha}" || "${actual_sha}" != "${expected_sha}" ]]; then
-          echo "::error::sha256 mismatch for ${archive_name}: sidecar says '${expected_sha}', archive is ${actual_sha}"
-          exit 8
-        fi
-        echo "setup-wp: archive sha256 verified against sidecar"
+          tar -xzf "${work_dir}/${archive_name}" -C "${stage}"
 
-        # Refuse a hostile archive BEFORE the first extraction writes anything.
-        # The sidecar proves integrity only, so the archive content is still
-        # untrusted: only regular files and directories under relative,
-        # dot-dot-free paths may pass. Two listings (names, then verbose types)
-        # work identically on GNU tar and bsdtar; their line counts must agree
-        # or the listing is ambiguous (e.g. a newline in a name) and is refused.
-        stage="${work_dir}/stage"
-        names_list="${work_dir}/entries.names"
-        kinds_list="${work_dir}/entries.kinds"
-        if ! tar -tzf "${work_dir}/${archive_name}" > "${names_list}" ||
-           ! tar -tzvf "${work_dir}/${archive_name}" > "${kinds_list}"; then
-          echo "::error::${archive_name} cannot be listed; refusing to extract"
-          exit 15
-        fi
-        if [[ "$(wc -l < "${names_list}")" -ne "$(wc -l < "${kinds_list}")" ]]; then
-          echo "::error::${archive_name} has an ambiguous entry listing; refusing to extract"
-          exit 13
-        fi
-        while IFS= read -r entry; do
-          case "${entry}" in
-            /*)
-              echo "::error::${archive_name} has an absolute-path entry '${entry}'; refusing to extract"
-              exit 13
-              ;;
-          esac
-          case "/${entry}/" in
-            */../*)
-              echo "::error::${archive_name} has a path-traversal entry '${entry}'; refusing to extract"
-              exit 13
-              ;;
-          esac
-        done < "${names_list}"
-        while IFS= read -r line; do
-          # bsdtar lists a ustar hardlink that claims data as a regular file
-          # with a trailing "link to <target>"; refuse any link annotation.
-          case "${line}" in
-            *" link to "*|*" -> "*)
-              echo "::error::${archive_name} has a link entry '${line}'; refusing to extract"
-              exit 13
-              ;;
-          esac
-          case "${line:0:1}" in
-            -|d) ;;
-            *)
-              echo "::error::${archive_name} has a non-regular entry (symlink, hardlink, or device) '${line}'; refusing to extract"
-              exit 13
-              ;;
-          esac
-        done < "${kinds_list}"
+          for member in bin/wp package-root; do
+            if [[ -L "${stage}/${member}" ]]; then
+              echo "::error::${archive_name} extracted ${member} as a symlink; refusing to install"
+              exit 14
+            fi
+          done
 
-        tar -xzf "${work_dir}/${archive_name}" -C "${stage}"
-
-        for member in bin/wp package-root; do
-          if [[ -L "${stage}/${member}" ]]; then
-            echo "::error::${archive_name} extracted ${member} as a symlink; refusing to install"
+          # Listing text can be wrong (see above), so also inspect what actually
+          # landed: only regular, singly-linked files and directories may exist.
+          stray="$(find "${stage}" ! -type f ! -type d -print -quit)"
+          if [[ -z "${stray}" ]]; then
+            stray="$(find "${stage}" -type f -links +1 -print -quit)"
+          fi
+          if [[ -n "${stray}" ]]; then
+            echo "::error::${archive_name} extracted a non-regular or hard-linked entry '${stray}'; refusing to install"
             exit 14
           fi
-        done
 
-        # Listing text can be wrong (see above), so also inspect what actually
-        # landed: only regular, singly-linked files and directories may exist.
-        stray="$(find "${stage}" ! -type f ! -type d -print -quit)"
-        if [[ -z "${stray}" ]]; then
-          stray="$(find "${stage}" -type f -links +1 -print -quit)"
-        fi
-        if [[ -n "${stray}" ]]; then
-          echo "::error::${archive_name} extracted a non-regular or hard-linked entry '${stray}'; refusing to install"
-          exit 14
-        fi
-
-        if [[ "${cache_hit}" != "true" ]]; then
-          if [[ ! -f "${stage}/bin/wp" ]]; then
-            echo "::error::${archive_name} has no bin/wp"
-            exit 9
-          fi
-
-          install_dir="${RUNNER_TEMP:-/tmp}/webpresso-wp"
-          mkdir -p "${install_dir}"
-          cp "${stage}/bin/wp" "${install_dir}/wp"
-          chmod +x "${install_dir}/wp"
-
-          if [[ -n "${WP_CHECKSUM}" ]]; then
-            actual="$(sha256_of "${install_dir}/wp")"
-            if [[ "${actual}" != "${WP_CHECKSUM}" ]]; then
-              echo "::error::sha256 mismatch for bin/wp from ${archive_name}: expected ${WP_CHECKSUM}, got ${actual}"
-              exit 5
+          install_root="${RUNNER_TEMP:-/tmp}/webpresso-wp"
+          install_dir="${install_root}/bin"
+          if [[ "${cache_hit}" != "true" ]]; then
+            if [[ ! -f "${stage}/bin/wp" ]]; then
+              echo "::error::${archive_name} has no bin/wp"
+              exit 9
             fi
-            echo "setup-wp: sha256 verified"
-          fi
 
-          # Populate the tool cache so a later job on the same runner (and any
-          # consumer probing the same path) short-circuits. Best effort: the
-          # cache root is root-owned on some images, and failing to seed it is
-          # not a reason to fail an otherwise successful install.
-          #
-          # The digest record is removed first and written only after the
-          # binary it describes is in place, so an interrupted seed leaves no
-          # record (a later miss) and never a record for a different binary.
-          installed_sha="$(sha256_of "${install_dir}/wp")"
-          if mkdir -p "${cache_root}" 2>/dev/null &&
-             rm -f "${cache_record}" 2>/dev/null &&
-             cp "${install_dir}/wp" "${cache_root}/wp.tmp" 2>/dev/null &&
-             mv "${cache_root}/wp.tmp" "${cache_root}/wp" 2>/dev/null; then
-            chmod +x "${cache_root}/wp" || true
-            if printf '%s\n' "${installed_sha}" 2>/dev/null > "${cache_root}/wp.sha256.tmp" &&
-               mv "${cache_root}/wp.sha256.tmp" "${cache_root}/wp.sha256" 2>/dev/null; then
-              touch "$(dirname "${cache_root}")/${tool_arch}.complete" 2>/dev/null || true
-              echo "setup-wp: seeded tool cache at ${cache_root}"
+            # Verify optional caller checksum BEFORE installing or seeding
+            # anything, so a mismatch leaves nothing behind.
+            if [[ -n "${WP_CHECKSUM}" ]]; then
+              actual="$(sha256_of "${stage}/bin/wp")"
+              if [[ "${actual}" != "${WP_CHECKSUM}" ]]; then
+                echo "::error::sha256 mismatch for bin/wp from ${archive_name}: expected ${WP_CHECKSUM}, got ${actual}"
+                exit 5
+              fi
+              echo "setup-wp: sha256 verified"
             fi
-          fi
 
-          echo "${install_dir}" >> "${GITHUB_PATH}"
-          echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
-          echo "setup-wp: installed wp ${WP_VERSION} (${archive_name}) to ${install_dir}"
+            # Mark every regular file under bin/ executable so compiled wp and
+            # any sibling helper executables (current or future) work verbatim
+            # without maintaining per-version filename lists in this action.
+            find "${stage}/bin" -maxdepth 1 -type f -exec chmod +x {} +
+            installed_sha="$(sha256_of "${stage}/bin/wp")"
+
+            # Atomically promote the entire verified archive tree (bin/*,
+            # manifest.json, package-root/, and any future runtime assets)
+            # verbatim into install_root.
+            rm -rf "${install_root}"
+            mv "${stage}" "${install_root}"
+
+            # Populate the tool cache with the complete verified archive tree
+            # so a later job on the same runner (and any consumer probing the
+            # same path) short-circuits cleanly. Best effort: the cache root is
+            # root-owned on some images, and failing to seed it is not a reason
+            # to fail an otherwise successful install.
+            #
+            # Seed BEFORE any package-root runtime dependency install so the
+            # cache stays hermetic and identical to the verified archive. The
+            # digest record is invalidated first and written only after the
+            # whole tree is swapped into place, so an interrupted seed leaves
+            # no record (a later miss) and never a record for a different tree.
+            cache_parent="$(dirname "${cache_root}")"
+            cache_stage="${cache_root}.staging.$$"
+            if mkdir -p "${cache_parent}" 2>/dev/null &&
+               rm -rf "${cache_stage}" 2>/dev/null &&
+               cp -Rp "${install_root}" "${cache_stage}" 2>/dev/null &&
+               rm -f "${cache_record}" 2>/dev/null &&
+               rm -rf "${cache_root}" 2>/dev/null &&
+               mv "${cache_stage}" "${cache_root}" 2>/dev/null; then
+              if printf '%s\n' "${installed_sha}" 2>/dev/null > "${cache_root}/wp.sha256.tmp" &&
+                 mv "${cache_root}/wp.sha256.tmp" "${cache_root}/wp.sha256" 2>/dev/null; then
+                touch "${cache_parent}/${tool_arch}.complete" 2>/dev/null || true
+                echo "setup-wp: seeded tool cache at ${cache_root}"
+              fi
+            else
+              rm -rf "${cache_stage}" 2>/dev/null || true
+            fi
+
+            echo "${install_dir}" >> "${GITHUB_PATH}"
+            echo "WP_INSTALL_DIR=${install_dir}" >> "${GITHUB_ENV}"
+            echo "setup-wp: installed wp ${WP_VERSION} (${archive_name}) to ${install_dir}"
+            package_root_src="${install_root}/package-root"
+          else
+            package_root_src="${stage}/package-root"
+          fi
         fi
 
         if [[ "${WP_PACKAGE_ROOT}" != "true" ]]; then
+          if [[ -n "${work_dir}" ]]; then
+            rm -rf "${work_dir}"
+          fi
           exit 0
         fi
 
-        # The package root is the package-root/ tree of the SAME archive: one
-        # source, one version, no credential, no second download. No fallback:
-        # if the archive lacks it, that is a publishing bug and it should say so.
+        # The package root is the package-root/ tree of the SAME archive (or
+        # its verified tool-cache copy): one source, one version, no
+        # credential, no second download. Always stage into a dedicated
+        # writable directory under RUNNER_TEMP so the tool cache and installed
+        # release tree remain immutable when runtime dependencies are installed.
+        # No fallback: if the archive lacks it, that is a publishing bug and it
+        # should say so.
         package_root="${RUNNER_TEMP:-/tmp}/webpresso-wp-package-root"
         rm -rf "${package_root}"
-        if [[ ! -d "${stage}/package-root" ]]; then
+        if [[ ! -d "${package_root_src}" ]]; then
           echo "::error::${archive_name} has no package-root/."
           exit 11
         fi
-        mv "${stage}/package-root" "${package_root}"
+        cp -Rp "${package_root_src}" "${package_root}"
+        if [[ -n "${work_dir}" ]]; then
+          rm -rf "${work_dir}"
+        fi
 
         # Fail on the thing callers actually depend on, not just on "an archive
         # extracted". A package root without catalog/ resolves nothing.

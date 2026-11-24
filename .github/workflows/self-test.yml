@@ -202,11 +202,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/bin/wp"
+          legacy="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
           mkdir -p "$(dirname "${expected}")"
           printf '#!/bin/sh\nprintf "WP_PARTIAL_CACHE_POISON\\n" >&2\nexit 42\n' > "${expected}"
-          chmod 0644 "${expected}"
-          if [[ -x "${expected}" ]]; then
+          printf '#!/bin/sh\nprintf "WP_PARTIAL_CACHE_POISON\\n" >&2\nexit 42\n' > "${legacy}"
+          chmod 0644 "${expected}" "${legacy}"
+          if [[ -x "${expected}" || -x "${legacy}" ]]; then
             echo "::error::partial fixture is unexpectedly executable"
             exit 1
           fi
@@ -219,16 +221,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          cache_root="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64"
+          expected="${cache_root}/bin/wp"
           if [[ ! -x "${expected}" ]]; then
             echo "::error::setup-wp did not safely reseed ${expected}"
+            exit 1
+          fi
+          if [[ -e "${cache_root}/wp" ]]; then
+            echo "::error::setup-wp left stale legacy flat file ${cache_root}/wp behind after atomic reseed"
             exit 1
           fi
           if grep -q "WP_PARTIAL_CACHE_POISON" "${expected}"; then
             echo "::error::setup-wp did not replace the partial cache payload"
             exit 1
           fi
+          for required in "${cache_root}/manifest.json" "${cache_root}/package-root/package.json" "${cache_root}/wp.sha256"; do
+            if [[ ! -f "${required}" ]]; then
+              echo "::error::setup-wp did not seed ${required}"
+              exit 1
+            fi
+          done
           "${expected}" --help >/dev/null
+
+          # Prove compiled wp resolves its sibling runtime assets (TS7 worker +
+          # package-root) end-to-end against a real vite.config.ts#fmt fixture.
+          smoke="${RUNNER_TEMP}/wp-compiled-smoke"
+          rm -rf "${smoke}"
+          mkdir -p "${smoke}/repo" "${smoke}/stub-bin"
+          printf '#!/bin/sh\nexit 0\n' > "${smoke}/stub-bin/vp"
+          chmod +x "${smoke}/stub-bin/vp"
+          git -C "${smoke}/repo" init -q
+          printf '{"name":"smoke","private":true}\n' > "${smoke}/repo/package.json"
+          printf 'export default { fmt: { printWidth: 100 } };\n' > "${smoke}/repo/vite.config.ts"
+          git -C "${smoke}/repo" add .
+          (cd "${smoke}/repo" && PATH="${smoke}/stub-bin:${PATH}" wp format --check)
+
           tar -C "${RUNNER_TOOL_CACHE}" -czf "${RUNNER_TEMP}/setup-wp-cache.tgz" "wp/${WP_VERSION}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -261,7 +288,7 @@ jobs:
           set -euo pipefail
           mkdir -p "${RUNNER_TOOL_CACHE}"
           tar -xzf "${RUNNER_TEMP}/setup-wp-seed/setup-wp-cache.tgz" -C "${RUNNER_TOOL_CACHE}"
-          test -x "${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          test -x "${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/bin/wp"
 
       - uses: ./.github/actions/setup-wp
         with:
@@ -272,7 +299,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/wp"
+          expected="${RUNNER_TOOL_CACHE}/wp/${WP_VERSION}/x64/bin/wp"
           if [[ "${WP_INSTALL_DIR}" != "$(dirname "${expected}")" ]]; then
             echo "::error::setup-wp did not publish the cache install directory"
             exit 1
@@ -282,6 +309,19 @@ jobs:
             exit 1
           fi
           "${expected}" --help >/dev/null
+
+          # Prove the cached whole-tree install resolves sibling runtime assets
+          # identically on a fresh runner with zero network access.
+          smoke="${RUNNER_TEMP}/wp-compiled-smoke"
+          rm -rf "${smoke}"
+          mkdir -p "${smoke}/repo" "${smoke}/stub-bin"
+          printf '#!/bin/sh\nexit 0\n' > "${smoke}/stub-bin/vp"
+          chmod +x "${smoke}/stub-bin/vp"
+          git -C "${smoke}/repo" init -q
+          printf '{"name":"smoke","private":true}\n' > "${smoke}/repo/package.json"
+          printf 'export default { fmt: { printWidth: 100 } };\n' > "${smoke}/repo/vite.config.ts"
+          git -C "${smoke}/repo" add .
+          (cd "${smoke}/repo" && PATH="${smoke}/stub-bin:${PATH}" wp format --check)
 
   # The contract suite proves the wait-for-checks polling program against a
   # mocked API. These two jobs prove the composite against the REAL check-runs

@@ -12,7 +12,7 @@ import {
 } from "./helpers.ts";
 
 const SETUP_WP_ACTION_BEHAVIOR_SHA256 =
-  "68b46bd398dfcc0cff005eb5bbc22d095070e235a9c8e50071f57564dc302b91";
+  "34b87c0a7b3aca06546421ec80d2bea89c111ccb1028c1201408fa55c0537861";
 const ACTION_BEHAVIOR_SHA256 = "24ea153009ff3e6a0347be7f978978e73bf01ed653cb940724e5e1aae4f33dc2";
 
 const readme = readRepoFile(README_PATH);
@@ -82,15 +82,18 @@ describe("setup-wp current information", () => {
       installScript.indexOf("curl -fsSL"),
     );
     expect(installScript.indexOf("curl -fsSL")).toBeLessThan(
-      installScript.indexOf('sha256_of "${install_dir}/wp"'),
+      installScript.indexOf('sha256_of "${stage}/bin/wp"'),
+    );
+    expect(installScript.indexOf('sha256_of "${stage}/bin/wp"')).toBeLessThan(
+      installScript.indexOf('mv "${stage}" "${install_root}"'),
     );
     expect(installScript).toInclude("Best effort");
 
     // A hit is verified against the caller checksum, else the seeded digest
     // record; with neither it is a miss. The record is seeded only after the
-    // binary is in place, so a failed seed never leaves a stale record.
+    // whole tree is swapped into place, so a failed seed never leaves a stale record.
     expect(installScript).toInclude('"${cache_root}/wp.sha256"');
-    expect(installScript.indexOf('mv "${cache_root}/wp.tmp"')).toBeLessThan(
+    expect(installScript.indexOf('mv "${cache_stage}" "${cache_root}"')).toBeLessThan(
       installScript.indexOf('mv "${cache_root}/wp.sha256.tmp"'),
     );
     expect(wpSection).toMatch(/cache hit.*`checksum`.*`wp\.sha256`/isu);
