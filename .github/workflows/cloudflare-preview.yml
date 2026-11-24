@@ -189,7 +189,7 @@ jobs:
       # (0.0.24 at the pinned setup-wp) the sign-in step does nothing; at or
       # above it, it signs wp in for this job with the job's OIDC token, or
       # with the break-glass entitlement when the caller passed one.
-      - uses: webpresso/github-actions/.github/actions/setup-wp@139e85a4e0119ff24f87e32bbc5f9f8a9e838ea0
+      - uses: webpresso/github-actions/.github/actions/setup-wp@12f625493b5aa93299e111ad2284c95633aea270
         with:
           version: ${{ inputs.wp_version }}
           entitlement: ${{ secrets.wp_entitlement }}
