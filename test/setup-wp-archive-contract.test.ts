@@ -255,8 +255,10 @@ type RunOptions = FixtureOptions & {
   readonly packageRoot?: boolean;
   readonly checksum?: string;
   readonly tarStub?: TarStub;
-  /** Pre-seed the runner tool cache with this wp binary body (a tool-cache hit). */
+  /** Pre-seed the runner tool cache with this wp binary body (legacy flat `<cache>/wp` layout). */
   readonly cachedBin?: string;
+  /** Pre-seed the runner tool cache with a full archive tree (`<cache>/bin/wp` + `package-root/catalog/`). */
+  readonly cachedTreeBin?: string;
   /** Pre-seed a `wp.sha256` digest record next to the cached binary. */
   readonly cachedRecord?: string;
 };
@@ -276,6 +278,17 @@ function runAction(options: RunOptions) {
     mkdirSync(cacheRoot, { recursive: true });
     writeFileSync(join(cacheRoot, "wp"), options.cachedBin);
     chmodSync(join(cacheRoot, "wp"), 0o755);
+    if (options.cachedRecord !== undefined)
+      writeFileSync(join(cacheRoot, "wp.sha256"), options.cachedRecord);
+  }
+  if (options.cachedTreeBin !== undefined) {
+    const cacheRoot = join(dir, "toolcache", "wp", VERSION, "x64");
+    mkdirSync(join(cacheRoot, "bin"), { recursive: true });
+    writeFileSync(join(cacheRoot, "bin", "wp"), options.cachedTreeBin);
+    chmodSync(join(cacheRoot, "bin", "wp"), 0o755);
+    writeFileSync(join(cacheRoot, "manifest.json"), "{}\n");
+    mkdirSync(join(cacheRoot, "package-root", "catalog"), { recursive: true });
+    writeFileSync(join(cacheRoot, "package-root", "catalog", "x"), "cached-catalog\n");
     if (options.cachedRecord !== undefined)
       writeFileSync(join(cacheRoot, "wp.sha256"), options.cachedRecord);
   }
@@ -333,14 +346,51 @@ describe("setup-wp install archive contract", () => {
     });
   }
 
-  it("installs bin/wp from the archive and exports the install dir", () => {
+  it("installs bin/wp from the archive in compiled layout and exports the bin dir", () => {
     const run = runAction({ target: "linux-x64" });
     expect(run.result.status, run.output).toBe(0);
-    const installed = join(run.dir, "webpresso-wp", "wp");
+    const installed = join(run.dir, "webpresso-wp", "bin", "wp");
     expect(readFileSync(installed, "utf8")).toBe(FIXTURE_BIN);
     expect(lstatSync(installed).mode & 0o111).not.toBe(0);
-    expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp")}`);
+    expect(existsSync(join(run.dir, "webpresso-wp", "package-root", "catalog", "x"))).toBe(true);
+    expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp", "bin")}`);
     expect(run.githubEnv).not.toInclude("WEBPRESSO_PACKAGE_ROOT");
+  });
+
+  it("preserves the entire verified archive tree (all bin/* executables, manifest, and future sibling dirs) without hardcoded helper names", () => {
+    expect(installScript).not.toInclude("webpresso-typescript7-worker");
+    const workerBin = "#!/bin/sh\necho ts7 worker\n";
+    const futureBin = "#!/bin/sh\necho future helper\n";
+    const run = runAction({
+      target: "linux-x64",
+      entries: [
+        ...GOOD_ENTRIES,
+        { name: "bin/webpresso-typescript7-worker", type: "file", content: workerBin },
+        { name: "bin/future-helper", type: "file", content: futureBin },
+        { name: "manifest.json", type: "file", content: '{"version":"1.2.3"}\n' },
+        { name: "runtime/", type: "dir" },
+        { name: "runtime/assets.dat", type: "file", content: "future-runtime-data\n" },
+      ],
+    });
+    expect(run.result.status, run.output).toBe(0);
+
+    const installRoot = join(run.dir, "webpresso-wp");
+    const cacheRoot = join(run.dir, "toolcache", "wp", VERSION, "x64");
+    for (const root of [installRoot, cacheRoot]) {
+      for (const [name, expected] of [
+        ["webpresso-typescript7-worker", workerBin],
+        ["future-helper", futureBin],
+      ] as const) {
+        const helper = join(root, "bin", name);
+        expect(readFileSync(helper, "utf8")).toBe(expected);
+        expect(lstatSync(helper).mode & 0o111).not.toBe(0);
+      }
+      expect(readFileSync(join(root, "manifest.json"), "utf8")).toBe('{"version":"1.2.3"}\n');
+      expect(readFileSync(join(root, "runtime", "assets.dat"), "utf8")).toBe(
+        "future-runtime-data\n",
+      );
+      expect(existsSync(join(root, "package-root", "catalog", "x"))).toBe(true);
+    }
   });
 
   it("extracts package-root/ from the same archive with no second download", () => {
@@ -364,17 +414,20 @@ describe("setup-wp install archive contract", () => {
     expect(run.output).toInclude("sha256 verified");
   });
 
-  it("fails with a named error on a checksum input mismatch", () => {
+  it("fails with a named error on a checksum input mismatch and installs nothing", () => {
     const run = runAction({ target: "linux-x64", checksum: "0".repeat(64) });
     expect(run.result.status, run.output).toBe(5);
     expect(run.output).toInclude("::error::sha256 mismatch for bin/wp");
+    expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
+    expect(existsSync(join(run.dir, "toolcache", "wp", VERSION, "x64"))).toBe(false);
+    expect(run.githubEnv).toBe("");
   });
 
   it("fails with a named error when the archive sha256 differs from the sidecar", () => {
     const run = runAction({ target: "linux-x64", sidecarSha: "f".repeat(64) });
     expect(run.result.status, run.output).toBe(8);
     expect(run.output).toInclude("::error::sha256 mismatch for wp-linux-x64.tar.gz");
-    expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+    expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
   });
 
   it("fails closed with a named error when package-root/ has no catalog/", () => {
@@ -391,7 +444,7 @@ describe("setup-wp install archive contract", () => {
       expect(run.output).toInclude(
         `::error::download failed for ${BASE_URL}/${sidecarName("linux-x64")}`,
       );
-      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+      expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
     });
 
     for (const field of ["archive", "version", "target"] as const) {
@@ -400,7 +453,7 @@ describe("setup-wp install archive contract", () => {
         expect(run.result.status, run.output).toBe(7);
         expect(run.output).toInclude(`::error::sidecar wp-linux-x64.tar.gz.json ${field} mismatch`);
         expect(run.output).toInclude("got 'bogus'");
-        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
       });
     }
 
@@ -412,7 +465,7 @@ describe("setup-wp install archive contract", () => {
         const run = runAction({ target: "linux-x64", sidecarText });
         expect(run.result.status, run.output).toBe(7);
         expect(run.output).toInclude("::error::sidecar wp-linux-x64.tar.gz.json archive mismatch");
-        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
       });
     }
 
@@ -423,7 +476,7 @@ describe("setup-wp install archive contract", () => {
       });
       expect(run.result.status, run.output).toBe(9);
       expect(run.output).toInclude("::error::wp-linux-x64.tar.gz has no bin/wp");
-      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+      expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
     });
 
     it("exits 11 when package-root is requested but absent from the archive", () => {
@@ -489,7 +542,7 @@ describe("setup-wp install archive contract", () => {
         expect(readdirSync(run.stage)).toStrictEqual([]);
         expect(existsSync(join(run.dir, "webpresso-wp-archive", "escape"))).toBe(false);
         expect(existsSync(absoluteTarget)).toBe(false);
-        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
         expect(run.githubEnv).toBe("");
       });
@@ -505,7 +558,7 @@ describe("setup-wp install archive contract", () => {
         "::error::wp-linux-x64.tar.gz cannot be listed; refusing to extract",
       );
       expect(readdirSync(run.stage)).toStrictEqual([]);
-      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+      expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
     });
 
     it("exits 15 on a truncated archive and extracts nothing", () => {
@@ -519,7 +572,7 @@ describe("setup-wp install archive contract", () => {
       });
       expect(run.result.status, run.output).toBe(15);
       expect(readdirSync(run.stage)).toStrictEqual([]);
-      expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+      expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
     });
 
     for (const [what, mode] of [
@@ -532,7 +585,7 @@ describe("setup-wp install archive contract", () => {
         expect(run.output).toInclude(
           "::error::wp-linux-x64.tar.gz extracted a non-regular or hard-linked entry",
         );
-        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
         expect(run.githubEnv).toBe("");
       });
@@ -548,7 +601,7 @@ describe("setup-wp install archive contract", () => {
         expect(run.output).toInclude(
           `::error::wp-linux-x64.tar.gz extracted ${label} as a symlink; refusing to install`,
         );
-        expect(existsSync(join(run.dir, "webpresso-wp", "wp"))).toBe(false);
+        expect(existsSync(join(run.dir, "webpresso-wp"))).toBe(false);
         expect(existsSync(join(run.dir, "webpresso-wp-package-root"))).toBe(false);
         expect(run.githubEnv).toBe("");
       });
@@ -630,20 +683,54 @@ describe("setup-wp install archive contract", () => {
         `${BASE_URL}/${sidecarName("linux-x64")}`,
       ]);
       expect(run.output).toInclude("archive sha256 verified against sidecar");
-      const installed = join(run.dir, "webpresso-wp", "wp");
+      const installed = join(run.dir, "webpresso-wp", "bin", "wp");
       expect(readFileSync(installed, "utf8")).toBe(FIXTURE_BIN);
-      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp")}`);
+      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(run.dir, "webpresso-wp", "bin")}`);
       expect(run.githubEnv).not.toInclude(`WP_INSTALL_DIR=${cacheDir(run.dir)}`);
-      expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
+      expect(existsSync(join(cacheDir(run.dir), "wp"))).toBe(false);
+      expect(readFileSync(join(cacheDir(run.dir), "bin", "wp"), "utf8")).toBe(FIXTURE_BIN);
       expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(
         sha256(FIXTURE_BIN),
       );
     });
 
+    it("serves a verified whole-tree cache hit (including package-root: true) with zero network downloads", () => {
+      const run = runAction({
+        target: "linux-x64",
+        cachedTreeBin: CACHED_BIN,
+        cachedRecord: `${sha256(CACHED_BIN)}\n`,
+        packageRoot: true,
+      });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.output).toInclude("cached wp sha256 verified");
+      expect(run.curlUrls).toStrictEqual([]);
+      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${join(cacheDir(run.dir), "bin")}`);
+      const packageRoot = join(run.dir, "webpresso-wp-package-root");
+      expect(run.githubEnv).toInclude(`WEBPRESSO_PACKAGE_ROOT=${packageRoot}`);
+      expect(readFileSync(join(packageRoot, "catalog", "x"), "utf8")).toBe("cached-catalog\n");
+      // Tool cache stays immutable: WEBPRESSO_PACKAGE_ROOT points to RUNNER_TEMP, never into toolcache.
+      expect(run.githubEnv).not.toInclude(`WEBPRESSO_PACKAGE_ROOT=${cacheDir(run.dir)}`);
+    });
+
+    it("falls back to downloading the archive for package-root: true on a legacy flat cache hit", () => {
+      const run = runAction({
+        target: "linux-x64",
+        cachedBin: CACHED_BIN,
+        cachedRecord: `${sha256(CACHED_BIN)}\n`,
+        packageRoot: true,
+      });
+      expect(run.result.status, run.output).toBe(0);
+      expect(run.curlUrls).toHaveLength(2);
+      expect(run.githubEnv).toInclude(`WP_INSTALL_DIR=${cacheDir(run.dir)}`);
+      const packageRoot = join(run.dir, "webpresso-wp-package-root");
+      expect(run.githubEnv).toInclude(`WEBPRESSO_PACKAGE_ROOT=${packageRoot}`);
+      expect(existsSync(join(packageRoot, "catalog", "x"))).toBe(true);
+    });
+
     it("writes a wp.sha256 record when it seeds the cache from a verified archive", () => {
       const run = runAction({ target: "linux-x64" });
       expect(run.result.status, run.output).toBe(0);
-      expect(readFileSync(join(cacheDir(run.dir), "wp"), "utf8")).toBe(FIXTURE_BIN);
+      expect(readFileSync(join(cacheDir(run.dir), "bin", "wp"), "utf8")).toBe(FIXTURE_BIN);
       expect(readFileSync(join(cacheDir(run.dir), "wp.sha256"), "utf8").trim()).toBe(
         sha256(FIXTURE_BIN),
       );
